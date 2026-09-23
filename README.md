@@ -1,88 +1,153 @@
-# UBL manager
+# UBL Manager
 
-Proyecto sencillo con frontend React + Vite y backend Express/Node para gestionar usuarios, roles y menú dinámico desde MySQL.
+Aplicacion web para gestionar equipos, jugadores, partidos, convocatorias y usuarios.
+Esta formada por un frontend React + Vite y una API Express/Node conectada a MySQL.
 
-Estructura:
+## Requisitos
 
-- `server/` - API Express y conexión a la base de datos (MySQL)
-- `client/` - App React creada con Vite
-- `db/init.sql` - script SQL para crear tablas y semillas iniciales
+- Node.js 20 o superior y npm.
+- MySQL accesible desde el equipo donde se ejecuta la API.
+- Docker y Docker Compose, solo si se va a ejecutar la API en contenedor.
 
-Configura las credenciales de la base de datos mediante las variables de entorno
-descritas en `server/.env.example`. No guardes contraseñas reales en el repositorio.
+Estructura principal:
 
-Instrucciones rápidas:
+- `client/`: frontend React.
+- `server/`: API Express y utilidades de base de datos.
+- `db/init.sql`: tablas y datos iniciales.
+- `docker-compose.prod.yml`: ejecucion de la API con Docker.
 
-1. Instalar dependencias:
+## Configurar la base de datos
 
-```bash
-cd d:/4 PROYECTOS/Desarrollos/BMN/ublmanager
+1. Crea la base de datos MySQL, por ejemplo `cynthia_app`.
+2. Copia el archivo de variables de entorno:
+
+```powershell
+Copy-Item server/.env.example server/.env
+```
+
+3. Edita `server/.env` y establece los valores reales de `DB_HOST`, `DB_USER`,
+   `DB_PASS`, `DB_NAME` y `DB_PORT`. Este archivo no se sube a Git.
+4. Ejecuta `db/init.sql` contra esa base de datos. Puede hacerse con el cliente
+   `mysql`:
+
+```powershell
+Get-Content .\db\init.sql | mysql -h localhost -P 3306 -u cynthia_user -p cynthia_app
+```
+
+Tambien puedes ejecutar el archivo desde SQLTools usando las extensiones
+`SQLTools` y `SQLTools MySQL/MariaDB`.
+
+## Instalacion paso a paso
+
+Desde la raiz del proyecto:
+
+```powershell
 npm install
 npm run install-all
 ```
 
-2. Crear la base de datos ejecutando el script SQL en `db/init.sql` contra la base `cynthia_app`.
+El segundo comando instala las dependencias del backend y del frontend.
 
-3. Levantar backend y frontend con un solo comando:
+## Ejecutar en desarrollo
 
-```bash
+La forma habitual inicia frontend y backend a la vez:
+
+```powershell
 npm run dev
 ```
 
-También se pueden ejecutar por separado:
+Direcciones locales:
 
-```bash
+- Frontend: `http://localhost:5173`
+- API: `http://localhost:4000`
+
+Vite redirige automaticamente las peticiones `/api` del frontend hacia la API.
+
+Para ejecutar cada parte por separado, abre dos terminales en la raiz.
+
+Terminal 1, backend:
+
+```powershell
 npm run start-server
+```
+
+Terminal 2, frontend:
+
+```powershell
 npm run start-client
 ```
 
-El frontend queda en `http://localhost:5173` y el API Node en `http://localhost:4000`.
+## Ejecutar la API con Docker
 
-Para compilar el frontend para Caddy:
+Docker ejecuta la API en el puerto `4000` y usa las variables de `server/.env`.
+Primero asegurate de haber creado y configurado ese archivo siguiendo la seccion
+de base de datos. Despues, desde la raiz:
 
-```bash
+```powershell
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Comprobar el contenedor:
+
+```powershell
+docker compose -f docker-compose.prod.yml ps
+docker compose -f docker-compose.prod.yml logs -f ublmanager-api
+```
+
+La API estara disponible en `http://localhost:4000`. Para detenerla:
+
+```powershell
+docker compose -f docker-compose.prod.yml down
+```
+
+El compose solo ejecuta el backend. El frontend puede ejecutarse con Vite o
+compilarse para servirlo con Caddy.
+
+## Compilar y publicar el frontend
+
+Crear la version de produccion:
+
+```powershell
 npm run build
 ```
 
-Publica `client/dist` en Caddy. El API Node debe ejecutarse aparte en el puerto 4000 y Caddy debe enrutar `/api/*` hacia `http://127.0.0.1:4000`.
-
-En Raspberry sin Node instalado, usa `server/Dockerfile` y `docker-compose.prod.yml` para ejecutar el API en Docker.
-
-Ejemplo de Caddyfile:
+El resultado queda en `client/dist`. Publicalo con Caddy y configura el proxy de
+`/api/*` hacia la API en el puerto `4000`:
 
 ```caddyfile
 ublmanager.duckdns.org {
-	handle /api/* {
-		reverse_proxy 127.0.0.1:4000
-	}
+    handle /api/* {
+        reverse_proxy 127.0.0.1:4000
+    }
 
-	handle {
-		root * /ruta/ublmanager/client/dist
-		try_files {path} /index.html
-		file_server
-	}
+    handle {
+        root * /ruta/ublmanager/client/dist
+        try_files {path} /index.html
+        file_server
+    }
 }
 ```
 
-Usar la extensión SQLTools en VS Code
---------------------------------------
+## Comprobaciones
 
-Si prefieres ejecutar la migración desde VS Code usando la extensión SQLTools, sigue estos pasos:
+Comprobar la sintaxis del backend:
 
-1. Instala las extensiones recomendadas: `SQLTools` y `SQLTools MySQL/MariaDB` (recomendadas en `.vscode/extensions.json`).
-2. Abre la paleta de comandos y crea una nueva conexión (o usa la configuración ya disponible en `.vscode/settings.json`).
-	- Host: `192.168.1.61`
-	- Port: `3306`
-	- Database: `cynthia_app`
-	- Username: `cynthia_user`
-	- Password: la configurada en tu entorno local
-3. Abre `db/init.sql` en el editor.
-4. Conéctate a la conexión que creaste (desde el panel SQLTools) y ejecuta el script completo con el botón "Run" o con "Run Query".
-
-Esto creará las tablas y semillas necesarias (roles, users, menu_page, role_menu).
-cd client && npm run dev
+```powershell
+node --check server/index.js
 ```
 
-4. Abrir `http://localhost:5173` para ver la landing.
+Comprobar la compilacion del frontend:
 
-Nota: El almacenamiento de contraseñas en Base64 no es seguro; aquí se hizo por petición explícita.
+```powershell
+npm run build
+```
+
+Consultar la API local:
+
+```powershell
+Invoke-RestMethod http://localhost:4000/api/matches
+```
+
+No guardes contrasenas reales en el repositorio. El sistema actual almacena las
+contrasenas de usuarios en Base64 por compatibilidad, pero Base64 no proporciona
+cifrado ni proteccion adecuada para produccion.
