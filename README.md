@@ -14,7 +14,7 @@ Estructura principal:
 - `client/`: frontend React.
 - `server/`: API Express y utilidades de base de datos.
 - `db/init.sql`: tablas y datos iniciales.
-- `docker-compose.prod.yml`: ejecucion de la API con Docker.
+- `docker-compose.yml`: ejecucion completa de la API y el frontend con Docker.
 
 ## Configurar la base de datos
 
@@ -77,33 +77,41 @@ Terminal 2, frontend:
 npm run start-client
 ```
 
-## Ejecutar la API con Docker
+## Ejecutar todo con Docker
 
-Docker ejecuta la API en el puerto `4000` y usa las variables de `server/.env`.
+Un unico Compose construye y ejecuta la API y el frontend. La API usa las
+variables de `server/.env` y el frontend se sirve mediante Caddy.
 Primero asegurate de haber creado y configurado ese archivo siguiendo la seccion
 de base de datos. Despues, desde la raiz:
 
 ```powershell
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose up -d --build
 ```
 
 Comprobar el contenedor:
 
 ```powershell
-docker compose -f docker-compose.prod.yml ps
-docker compose -f docker-compose.prod.yml logs -f ublmanager-api
+docker compose ps
+docker compose logs -f
 ```
 
-La API estara disponible en `http://localhost:4000`. Para detenerla:
+Aplicacion completa: `http://localhost:4173`.
+La API tambien queda disponible en `http://localhost:4000` para comprobaciones.
+Para detener todo:
 
 ```powershell
-docker compose -f docker-compose.prod.yml down
+docker compose down
 ```
 
-El compose solo ejecuta el backend. El frontend puede ejecutarse con Vite o
-compilarse para servirlo con Caddy.
+Para reconstruir las imagenes despues de cambiar el codigo:
 
-## Compilar y publicar el frontend
+```powershell
+docker compose up -d --build --force-recreate
+```
+
+Este flujo no necesita ejecutar `npm run build` ni copiar `client/dist` a mano.
+
+## Publicacion con dominio y Caddy externo
 
 Crear la version de produccion:
 
@@ -111,8 +119,9 @@ Crear la version de produccion:
 npm run build
 ```
 
-El resultado queda en `client/dist`. Publicalo con Caddy y configura el proxy de
-`/api/*` hacia la API en el puerto `4000`:
+El Compose ya incluye Caddy y sirve el frontend en el puerto `4173`. Si se usa
+otro Caddy como proxy externo con un dominio, configura `/api/*` hacia el puerto
+`4000` y el frontend hacia el puerto `4173`.
 
 ```caddyfile
 ublmanager.duckdns.org {

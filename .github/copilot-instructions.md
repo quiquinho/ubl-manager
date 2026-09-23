@@ -32,25 +32,18 @@ Servidor SSH:
 - Ruta remota del proyecto: `/home/quique/ublmanager`
 - La contrasena SSH o sudo debe introducirse directamente en el terminal. Nunca incluirla en codigo, instrucciones ni comandos guardados.
 
-### Frontend compilado
+### Frontend y backend
 
-Compilar desde la raiz del proyecto y copiar el contenido de `client/dist` a la ruta que sirve Caddy:
-
-```powershell
-npm run build
-scp -r client/dist/* quique@192.168.1.61:/home/quique/ublmanager/dist/
-```
-
-La configuracion de Caddy sirve `/home/quique/ublmanager/dist`.
+El `docker-compose.yml` compila el frontend dentro de la imagen web y sirve la aplicacion completa en el puerto 4173. No es necesario copiar `client/dist` manualmente.
 
 ### Backend Docker
 
-El despliegue remoto usa el `docker-compose.prod.yml` situado en la raiz remota. Su contexto Docker es `.` y el Dockerfile raiz copia `/home/quique/ublmanager/index.js` dentro de la imagen.
+El despliegue remoto usa el `docker-compose.yml` situado en la raiz remota. El Compose construye la API desde `server/` y el frontend desde `client/`, sirviendolo con Caddy en el puerto 4173.
 
-Por tanto, despues de modificar `server/index.js`, copiar tambien el archivo al `index.js` de la raiz remota:
+Por tanto, despues de publicar los cambios en GitHub, actualizar el repositorio remoto y reconstruir ambos servicios:
 
 ```powershell
-scp server/index.js quique@192.168.1.61:/home/quique/ublmanager/index.js
+ssh quique@192.168.1.61 "cd /home/quique/ublmanager; git pull --ff-only"
 ```
 
 Si cambia el esquema, copiar tambien `db/init.sql` a la ubicacion remota correspondiente y ejecutar la migracion contra la base de datos antes de usar las nuevas tablas.
@@ -58,10 +51,10 @@ Si cambia el esquema, copiar tambien `db/init.sql` a la ubicacion remota corresp
 Reconstruir el contenedor con TTY porque `sudo` solicita contrasena:
 
 ```powershell
-ssh -t quique@192.168.1.61 "cd /home/quique/ublmanager; sudo docker compose -f docker-compose.prod.yml up -d --build --force-recreate ublmanager-api"
+ssh -t quique@192.168.1.61 "cd /home/quique/ublmanager; sudo docker compose up -d --build --force-recreate"
 ```
 
-No usar solo `server/index.js` para reconstruir el contenedor remoto: el compose remoto construye desde la raiz y usa el `index.js` raiz.
+No reconstruir solo la API si cambia el frontend: el Compose debe reconstruir ambos servicios desde la raiz.
 
 ## Verificacion remota
 

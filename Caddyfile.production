@@ -1,18 +1,12 @@
-http://:4173 {
+:80 {
     handle /api/* {
-        reverse_proxy 127.0.0.1:4000
+        reverse_proxy ublmanager-api:4000
     }
 
     handle {
-        root * /home/quique/ublmanager/dist
+        root * /usr/share/caddy
         try_files {path} /index.html
         file_server
         encode gzip
     }
-}
-
-# Accept HTTPS with Caddy's local CA, then redirect clients to HTTP.
-https://:4173 {
-    tls internal
-    redir http://{http.request.host}{http.request.uri} 308
 }

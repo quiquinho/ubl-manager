@@ -1,0 +1,21 @@
+services:
+  ublmanager-api:
+    build:
+      context: ./server
+    container_name: ublmanager-api
+    restart: always
+    env_file:
+      - ./server/.env
+    ports:
+      - "4000:4000"
+
+  ublmanager-web:
+    build:
+      context: .
+      dockerfile: client/Dockerfile
+    container_name: ublmanager-web
+    restart: always
+    depends_on:
+      - ublmanager-api
+    ports:
+      - "4173:80"
