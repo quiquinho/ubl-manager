@@ -97,7 +97,8 @@ async function initDb() {
 		'ALTER TABLE match_player_stats ADD COLUMN time_on_court_seconds INT NOT NULL DEFAULT 0',
 		'ALTER TABLE match_player_stats ADD COLUMN court_started_at DATETIME NULL',
 		'ALTER TABLE match_player_stats ADD COLUMN seven_meters_received INT NOT NULL DEFAULT 0',
-		'ALTER TABLE match_player_stats ADD COLUMN seven_meters_saved INT NOT NULL DEFAULT 0'
+		'ALTER TABLE match_player_stats ADD COLUMN seven_meters_saved INT NOT NULL DEFAULT 0',
+		'ALTER TABLE match_stat_events ADD COLUMN period VARCHAR(30) NOT NULL DEFAULT \'1/2\''
 	]) {
 		try { await pool.query(query) } catch (err) { if (err.code !== 'ER_DUP_FIELDNAME') throw err }
 	}
@@ -375,8 +376,18 @@ app.get('/api/matches/:matchId/follow-up', async (req, res) => {
 		if (!matches.length) return res.status(404).json({ error: 'El partido no existe' })
 		await pool.query('INSERT IGNORE INTO match_tracking (match_id) VALUES (?)', [matchId])
 		await pool.query('INSERT IGNORE INTO match_player_stats (match_id, player_id) SELECT match_id, player_id FROM match_players WHERE match_id = ?', [matchId])
-		await pool.query('UPDATE match_tracking SET home_score = (SELECT COALESCE(SUM(goals), 0) FROM match_player_stats WHERE match_id = ?), visitor_score = (SELECT COALESCE(SUM(goals_conceded), 0) FROM match_player_stats WHERE match_id = ?) WHERE match_id = ?', [matchId, matchId, matchId])
 		const [tracking] = await pool.query('SELECT home_score, visitor_score, period, match_status, elapsed_seconds, timer_started_at, notes FROM match_tracking WHERE match_id = ?', [matchId])
+		if (tracking[0]?.match_status === 'No iniciado') {
+			await pool.query('DELETE FROM match_stat_events WHERE match_id = ?', [matchId])
+			await pool.query('DELETE FROM match_shot_events WHERE match_id = ?', [matchId])
+			await pool.query('DELETE FROM match_player_stats WHERE match_id = ?', [matchId])
+			await pool.query('INSERT IGNORE INTO match_player_stats (match_id, player_id) SELECT match_id, player_id FROM match_players WHERE match_id = ?', [matchId])
+			await pool.query('UPDATE match_tracking SET home_score = 0, visitor_score = 0, elapsed_seconds = 0, timer_started_at = NULL WHERE match_id = ?', [matchId])
+			tracking[0].home_score = 0
+			tracking[0].visitor_score = 0
+			tracking[0].elapsed_seconds = 0
+		}
+		else await pool.query('UPDATE match_tracking SET home_score = (SELECT COALESCE(SUM(goals), 0) FROM match_player_stats WHERE match_id = ?), visitor_score = (SELECT COALESCE(SUM(goals_conceded), 0) FROM match_player_stats WHERE match_id = ?) WHERE match_id = ?', [matchId, matchId, matchId])
 		const duration = getMatchDuration(matches[0].home_team_category)
 		const liveSeconds = liveElapsedSeconds(tracking[0])
 		const trackingData = { ...tracking[0], elapsed_seconds: liveSeconds }
@@ -424,7 +435,7 @@ app.get('/api/matches/:matchId/statistics', async (req, res) => {
 		})
 		const [shotEvents] = await pool.query(`SELECT e.id, e.player_id, CONCAT(p.nombre, ' ', COALESCE(p.apellidos, '')) AS player_name, e.event_type AS action, e.zone, NULL AS minute, e.created_at
 			FROM match_shot_events e JOIN players p ON p.id = e.player_id WHERE e.match_id = ?`, [matchId])
-		const [statEvents] = await pool.query(`SELECT e.id, e.player_id, CONCAT(p.nombre, ' ', COALESCE(p.apellidos, '')) AS player_name, e.stat_key AS action, e.zone, e.minute, e.created_at
+		const [statEvents] = await pool.query(`SELECT e.id, e.player_id, CONCAT(p.nombre, ' ', COALESCE(p.apellidos, '')) AS player_name, e.stat_key AS action, e.zone, e.minute, e.period, e.created_at
 			FROM match_stat_events e JOIN players p ON p.id = e.player_id WHERE e.match_id = ?`, [matchId])
 		const events = [...shotEvents, ...statEvents].sort((left, right) => new Date(right.created_at) - new Date(left.created_at))
 		const summary = {
@@ -460,13 +471,24 @@ app.put('/api/matches/:matchId/follow-up', async (req, res) => {
 		const requestedElapsed = normaliseNonNegativeInteger(req.body?.elapsed_seconds)
 		const periodChanged = current.period !== period
 		let elapsed = hasElapsedOverride ? requestedElapsed : wasRunning ? liveElapsedSeconds(current) : Number(current.elapsed_seconds || 0)
-		if (status === 'No iniciado' || periodChanged) elapsed = 0
+		const resettingMatch = status === 'No iniciado'
+		if (resettingMatch || periodChanged) elapsed = 0
+		const effectivePeriod = resettingMatch ? duration.periodFormat : period
 		if (status === 'En juego' && elapsed >= duration.minutes * 60) status = period === `${duration.periods}/${duration.periods}` ? 'Finalizado' : 'Descanso'
 		const isRunning = status === 'En juego'
+		if (resettingMatch) {
+			await pool.query('DELETE FROM match_stat_events WHERE match_id = ?', [matchId])
+			await pool.query('DELETE FROM match_shot_events WHERE match_id = ?', [matchId])
+			await pool.query('DELETE FROM match_player_stats WHERE match_id = ?', [matchId])
+		}
 		if (wasRunning && !isRunning) await pool.query('UPDATE match_player_stats SET time_on_court_seconds = time_on_court_seconds + IF(court_started_at IS NULL, 0, TIMESTAMPDIFF(SECOND, court_started_at, NOW())), court_started_at = NULL WHERE match_id = ? AND on_court = 1', [matchId])
 		if ((!wasRunning && isRunning) || (periodChanged && isRunning)) await pool.query('UPDATE match_player_stats SET court_started_at = NOW() WHERE match_id = ? AND on_court = 1', [matchId])
 		const timerStartedAt = isRunning && status === 'En juego' ? (hasElapsedOverride || periodChanged || !wasRunning ? new Date() : current.timer_started_at) : null
-		const [result] = await pool.query('UPDATE match_tracking SET home_score = (SELECT COALESCE(SUM(goals), 0) FROM match_player_stats WHERE match_id = ?), visitor_score = (SELECT COALESCE(SUM(goals_conceded), 0) FROM match_player_stats WHERE match_id = ?), period = ?, match_status = ?, elapsed_seconds = ?, timer_started_at = ?, notes = ? WHERE match_id = ?', [matchId, matchId, period, status, elapsed, timerStartedAt, String(req.body?.notes || ''), matchId])
+		const scoreFields = resettingMatch
+			? 'home_score = 0, visitor_score = 0'
+			: 'home_score = (SELECT COALESCE(SUM(goals), 0) FROM match_player_stats WHERE match_id = ?), visitor_score = (SELECT COALESCE(SUM(goals_conceded), 0) FROM match_player_stats WHERE match_id = ?)'
+		const scoreParams = resettingMatch ? [] : [matchId, matchId]
+		const [result] = await pool.query(`UPDATE match_tracking SET ${scoreFields}, period = ?, match_status = ?, elapsed_seconds = ?, timer_started_at = ?, notes = ? WHERE match_id = ?`, [...scoreParams, effectivePeriod, status, elapsed, timerStartedAt, String(req.body?.notes || ''), matchId])
 		if (!result.affectedRows) return res.status(404).json({ error: 'El seguimiento no existe' })
 		const [rows] = await pool.query('SELECT home_score, visitor_score, period, match_status, elapsed_seconds, timer_started_at, notes FROM match_tracking WHERE match_id = ?', [matchId])
 		res.json(rows[0])
@@ -484,7 +506,8 @@ app.put('/api/matches/:matchId/follow-up/players/:playerId', async (req, res) =>
 	try {
 		const [calledUp] = await pool.query('SELECT 1 FROM match_players WHERE match_id = ? AND player_id = ?', [matchId, playerId])
 		if (!calledUp.length) return res.status(404).json({ error: 'El jugador no pertenece a la convocatoria' })
-		const [currentStats] = await pool.query('SELECT s.on_court, s.time_on_court_seconds, s.court_started_at, t.match_status FROM match_player_stats s JOIN match_tracking t ON t.match_id = s.match_id WHERE s.match_id = ? AND s.player_id = ?', [matchId, playerId])
+		const [currentStats] = await pool.query(`SELECT s.on_court, s.time_on_court_seconds, s.court_started_at, s.${statFields.join(', s.')}, t.match_status, t.period, t.elapsed_seconds, t.timer_started_at
+			FROM match_player_stats s JOIN match_tracking t ON t.match_id = s.match_id WHERE s.match_id = ? AND s.player_id = ?`, [matchId, playerId])
 		const currentPlayer = currentStats[0]
 		const requestedOnCourt = req.body?.on_court ? 1 : 0
 		if (currentPlayer && Number(currentPlayer.on_court) !== requestedOnCourt && currentPlayer.match_status === 'En juego') {
@@ -492,8 +515,15 @@ app.put('/api/matches/:matchId/follow-up/players/:playerId', async (req, res) =>
 			else await pool.query('UPDATE match_player_stats SET time_on_court_seconds = time_on_court_seconds + IF(court_started_at IS NULL, 0, TIMESTAMPDIFF(SECOND, court_started_at, NOW())), court_started_at = NULL WHERE match_id = ? AND player_id = ?', [matchId, playerId])
 		}
 		const values = statFields.map(field => normaliseNonNegativeInteger(req.body?.[field]))
+		const elapsed = liveElapsedSeconds(currentPlayer || {})
+		const minute = Math.floor(elapsed / 60) + 1
 		await pool.query(`INSERT INTO match_player_stats (match_id, player_id, on_court, ${statFields.join(', ')}) VALUES (?, ?, ?, ${statFields.map(() => '?').join(', ')})
 			ON DUPLICATE KEY UPDATE on_court = VALUES(on_court), ${statFields.map(field => `${field} = VALUES(${field})`).join(', ')}`, [matchId, playerId, req.body?.on_court ? 1 : 0, ...values])
+		for (const [index, field] of statFields.entries()) {
+			const previousValue = normaliseNonNegativeInteger(currentPlayer?.[field])
+			const delta = values[index] - previousValue
+			if (delta) await pool.query('INSERT INTO match_stat_events (match_id, player_id, stat_key, amount, minute, period) VALUES (?, ?, ?, ?, ?, ?)', [matchId, playerId, field, delta, minute, currentPlayer?.period || '1/2'])
+		}
 		await pool.query('UPDATE match_tracking SET home_score = (SELECT COALESCE(SUM(goals), 0) FROM match_player_stats WHERE match_id = ?), visitor_score = (SELECT COALESCE(SUM(goals_conceded), 0) FROM match_player_stats WHERE match_id = ?) WHERE match_id = ?', [matchId, matchId, matchId])
 		const [rows] = await pool.query(`SELECT p.id, p.nombre, p.apellidos, p.numero, p.posicion, s.on_court, s.time_on_court_seconds, s.court_started_at, s.goals, s.shots, s.assists, s.turnovers, s.steals, s.saves, s.goals_conceded, s.blocks, s.exclusions_2min, s.yellow_cards, s.red_cards, s.blue_cards, s.seven_meters_scored, s.seven_meters_attempted, s.seven_meters_received, s.seven_meters_saved, s.fouls FROM players p JOIN match_player_stats s ON s.player_id = p.id WHERE s.match_id = ? AND s.player_id = ?`, [matchId, playerId])
 		res.json(rows[0])
@@ -513,7 +543,10 @@ app.post('/api/matches/:matchId/follow-up/players/:playerId/shots', async (req, 
 	try {
 		const [calledUp] = await pool.query('SELECT 1 FROM match_players WHERE match_id = ? AND player_id = ?', [matchId, playerId])
 		if (!calledUp.length) return res.status(404).json({ error: 'El jugador no pertenece a la convocatoria' })
+		const [trackingRows] = await pool.query('SELECT elapsed_seconds, timer_started_at, match_status, period FROM match_tracking WHERE match_id = ?', [matchId])
+		const minute = Math.floor(liveElapsedSeconds(trackingRows[0] || {}) / 60) + 1
 		await pool.query('INSERT INTO match_shot_events (match_id, player_id, event_type, zone) VALUES (?, ?, ?, ?)', [matchId, playerId, eventType, zone])
+		await pool.query('INSERT INTO match_stat_events (match_id, player_id, stat_key, amount, minute, period, zone) VALUES (?, ?, ?, 1, ?, ?, ?)', [matchId, playerId, eventType, minute, trackingRows[0]?.period || '1/2', zone])
 		if (eventType === 'goal') {
 			await pool.query('UPDATE match_player_stats SET goals = goals + 1, shots = shots + 1 WHERE match_id = ? AND player_id = ?', [matchId, playerId])
 			await pool.query('UPDATE match_tracking SET home_score = (SELECT COALESCE(SUM(goals), 0) FROM match_player_stats WHERE match_id = ?) WHERE match_id = ?', [matchId, matchId])
@@ -540,9 +573,9 @@ app.post('/api/matches/:matchId/follow-up/players/:playerId/seven-meters', async
 	try {
 		const [calledUp] = await pool.query('SELECT 1 FROM match_players WHERE match_id = ? AND player_id = ?', [matchId, playerId])
 		if (!calledUp.length) return res.status(404).json({ error: 'El jugador no pertenece a la convocatoria' })
-		const [trackingRows] = await pool.query('SELECT elapsed_seconds, timer_started_at, match_status FROM match_tracking WHERE match_id = ?', [matchId])
+		const [trackingRows] = await pool.query('SELECT elapsed_seconds, timer_started_at, match_status, period FROM match_tracking WHERE match_id = ?', [matchId])
 		const minute = Math.floor(liveElapsedSeconds(trackingRows[0] || {}) / 60) + 1
-		await pool.query('INSERT INTO match_stat_events (match_id, player_id, stat_key, amount, `minute`, `zone`) VALUES (?, ?, ?, 1, ?, ?)', [matchId, playerId, `seven_meter_${outcome}`, minute, zone])
+		await pool.query('INSERT INTO match_stat_events (match_id, player_id, stat_key, amount, `minute`, period, `zone`) VALUES (?, ?, ?, 1, ?, ?, ?)', [matchId, playerId, `seven_meter_${outcome}`, minute, trackingRows[0]?.period || '1/2', zone])
 		if (outcome === 'goal') {
 			await pool.query('UPDATE match_player_stats SET seven_meters_attempted = seven_meters_attempted + 1, seven_meters_scored = seven_meters_scored + 1, goals = goals + 1, shots = shots + 1 WHERE match_id = ? AND player_id = ?', [matchId, playerId])
 			await pool.query('UPDATE match_tracking SET home_score = (SELECT COALESCE(SUM(goals), 0) FROM match_player_stats WHERE match_id = ?) WHERE match_id = ?', [matchId, matchId])
