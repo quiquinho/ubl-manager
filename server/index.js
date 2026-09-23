@@ -425,12 +425,14 @@ app.get('/api/matches/:matchId/statistics', async (req, res) => {
 		await pool.query('INSERT IGNORE INTO match_player_stats (match_id, player_id) SELECT match_id, player_id FROM match_players WHERE match_id = ?', [matchId])
 		const [trackingRows] = await pool.query('SELECT home_score, visitor_score, period, match_status, elapsed_seconds, timer_started_at, notes FROM match_tracking WHERE match_id = ?', [matchId])
 		const tracking = { ...trackingRows[0], elapsed_seconds: liveElapsedSeconds(trackingRows[0]) }
-		const [players] = await pool.query(`SELECT p.id, p.nombre, p.apellidos, p.numero, p.posicion, s.on_court, s.time_on_court_seconds, s.court_started_at,
+		const [players] = await pool.query(`SELECT p.id, p.nombre, p.apellidos, p.numero, p.posicion, p.photo_url, p.photo_blob, s.on_court, s.time_on_court_seconds, s.court_started_at,
 			s.goals, s.shots, s.assists, s.turnovers, s.steals, s.saves, s.goals_conceded, s.blocks, s.exclusions_2min, s.yellow_cards, s.red_cards, s.blue_cards,
 			s.seven_meters_scored, s.seven_meters_attempted, s.seven_meters_received, s.seven_meters_saved, s.fouls
 			FROM match_players mp JOIN players p ON p.id = mp.player_id JOIN match_player_stats s ON s.match_id = mp.match_id AND s.player_id = mp.player_id
 			WHERE mp.match_id = ? ORDER BY p.numero IS NULL, p.numero, p.apellidos, p.nombre`, [matchId])
 		players.forEach(player => {
+			if (player.photo_blob) player.photo_data = `data:image/jpeg;base64,${player.photo_blob.toString('base64')}`
+			delete player.photo_blob
 			player.time_on_court_seconds = Number(player.time_on_court_seconds || 0) + (tracking.match_status === 'En juego' && player.on_court ? secondsSince(player.court_started_at) : 0)
 		})
 		const [shotEvents] = await pool.query(`SELECT e.id, e.player_id, CONCAT(p.nombre, ' ', COALESCE(p.apellidos, '')) AS player_name, e.event_type AS action, e.zone, NULL AS minute, e.created_at

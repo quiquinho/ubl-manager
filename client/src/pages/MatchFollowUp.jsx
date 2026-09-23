@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
 import Swal from "sweetalert2";
+import MatchStatsModal from "../components/MatchStatsModal";
 
 const statistics = [
   ["goals", "Goles"],
@@ -226,6 +227,7 @@ export default function MatchFollowUp() {
     player: null,
     group: "attack",
   });
+  const [showMatchStatsModal, setShowMatchStatsModal] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [clockSeconds, setClockSeconds] = useState(0);
@@ -649,6 +651,7 @@ export default function MatchFollowUp() {
               )}
             </span>
           </h2>
+          <button type="button" className="btn btn-sm btn-outline-info mt-2" onClick={() => setShowMatchStatsModal(true)} aria-label="Ver estadisticas completas del partido" title="Ver estadisticas completas del partido"><i className="fa-solid fa-chart-column me-1" aria-hidden="true" />Estadisticas</button>
           <p className="text-muted mb-0">
             {formatDate(match.scheduled_at)} · {formatTime(match.scheduled_at)}{" "}
             · {match.venue_name}
@@ -927,6 +930,7 @@ export default function MatchFollowUp() {
           <div className="modal-backdrop fade show" />
         </>
       )}
+      {showMatchStatsModal && <MatchStatsModal matchId={matchId} matchLabel={`${match.home_team_name} vs ${match.visitor_name}`} onClose={() => setShowMatchStatsModal(false)} />}
       {shotModal.show && (
         <>
           <div
