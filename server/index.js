@@ -347,7 +347,7 @@ app.post('/api/venues', async (req, res) => {
 
 function getMatchDuration(category) {
 	const normalizedCategory = String(category || '').toLocaleLowerCase('es')
-	if (normalizedCategory.includes('benjamin') || normalizedCategory.includes('benjamín') || normalizedCategory.includes('alevin') || normalizedCategory.includes('alevín')) return { periods: 4, periodFormat: '1/2/3/4', minutes: 10, label: '4 x 10 minutos' }
+	if (normalizedCategory.includes('benjamin') || normalizedCategory.includes('benjamín') || normalizedCategory.includes('alevin') || normalizedCategory.includes('alevín')) return { periods: 4, periodFormat: '1/4', minutes: 10, label: '4 x 10 minutos' }
 	if (normalizedCategory.includes('infantil')) return { periods: 2, periodFormat: '1/2', minutes: 25, label: '2 x 25 minutos' }
 	return { periods: 2, periodFormat: '1/2', minutes: 30, label: '2 x 30 minutos' }
 }
@@ -377,15 +377,25 @@ app.get('/api/matches/:matchId/follow-up', async (req, res) => {
 		await pool.query('INSERT IGNORE INTO match_player_stats (match_id, player_id) SELECT match_id, player_id FROM match_players WHERE match_id = ?', [matchId])
 		await pool.query('UPDATE match_tracking SET home_score = (SELECT COALESCE(SUM(goals), 0) FROM match_player_stats WHERE match_id = ?), visitor_score = (SELECT COALESCE(SUM(goals_conceded), 0) FROM match_player_stats WHERE match_id = ?) WHERE match_id = ?', [matchId, matchId, matchId])
 		const [tracking] = await pool.query('SELECT home_score, visitor_score, period, match_status, elapsed_seconds, timer_started_at, notes FROM match_tracking WHERE match_id = ?', [matchId])
-		const trackingData = { ...tracking[0], elapsed_seconds: liveElapsedSeconds(tracking[0]) }
+		const duration = getMatchDuration(matches[0].home_team_category)
+		const liveSeconds = liveElapsedSeconds(tracking[0])
+		const trackingData = { ...tracking[0], elapsed_seconds: liveSeconds }
+		if (tracking[0].match_status === 'En juego' && liveSeconds >= duration.minutes * 60) {
+			const endStatus = tracking[0].period === `${duration.periods}/${duration.periods}` ? 'Finalizado' : 'Descanso'
+			await pool.query('UPDATE match_player_stats SET time_on_court_seconds = time_on_court_seconds + IF(court_started_at IS NULL, 0, TIMESTAMPDIFF(SECOND, court_started_at, NOW())), court_started_at = NULL WHERE match_id = ? AND on_court = 1', [matchId])
+			await pool.query('UPDATE match_tracking SET elapsed_seconds = ?, match_status = ?, timer_started_at = NULL WHERE match_id = ?', [duration.minutes * 60, endStatus, matchId])
+			trackingData.elapsed_seconds = duration.minutes * 60
+			trackingData.match_status = endStatus
+			trackingData.timer_started_at = null
+		}
 		const [players] = await pool.query(`SELECT p.id, p.nombre, p.apellidos, p.numero, p.posicion, p.photo_url, p.photo_blob, s.on_court, s.time_on_court_seconds, s.court_started_at, s.goals, s.shots, s.assists, s.turnovers, s.steals, s.saves, s.goals_conceded, s.blocks, s.exclusions_2min, s.yellow_cards, s.red_cards, s.blue_cards, s.seven_meters_scored, s.seven_meters_attempted, s.seven_meters_received, s.seven_meters_saved, s.fouls
 			FROM match_players mp JOIN players p ON p.id = mp.player_id JOIN match_player_stats s ON s.match_id = mp.match_id AND s.player_id = mp.player_id WHERE mp.match_id = ? ORDER BY p.numero IS NULL, p.numero, p.apellidos, p.nombre`, [matchId])
 		players.forEach(player => {
 			if (player.photo_blob) player.photo_data = `data:image/jpeg;base64,${player.photo_blob.toString('base64')}`
 			delete player.photo_blob
 		})
-		const duration = getMatchDuration(matches[0].home_team_category)
-		trackingData.period = duration.periodFormat
+		const validPeriods = Array.from({ length: duration.periods }, (_, index) => `${index + 1}/${duration.periods}`)
+		if (!validPeriods.includes(trackingData.period) && trackingData.period !== 'Descanso') trackingData.period = duration.periodFormat
 		res.json({ match: matches[0], duration, tracking: trackingData, players })
 	} catch (err) {
 		console.error(err)
@@ -436,20 +446,26 @@ app.get('/api/matches/:matchId/statistics', async (req, res) => {
 app.put('/api/matches/:matchId/follow-up', async (req, res) => {
 	const matchId = Number(req.params.matchId)
 	const period = String(req.body?.period || 'Primera parte').trim()
-	const status = String(req.body?.match_status || 'No iniciado').trim()
+	let status = String(req.body?.match_status || 'No iniciado').trim()
 	if (!matchId) return res.status(400).json({ error: 'Partido no válido' })
 	try {
+		const [matchRows] = await pool.query('SELECT t.category FROM matches m JOIN teams t ON t.id = m.home_team_id WHERE m.id = ?', [matchId])
+		if (!matchRows.length) return res.status(404).json({ error: 'El partido no existe' })
+		const duration = getMatchDuration(matchRows[0].category)
 		const [currentRows] = await pool.query('SELECT * FROM match_tracking WHERE match_id = ?', [matchId])
 		if (!currentRows.length) return res.status(404).json({ error: 'El seguimiento no existe' })
 		const current = currentRows[0]
 		const wasRunning = current.match_status === 'En juego'
-		const isRunning = status === 'En juego'
 		const hasElapsedOverride = req.body?.elapsed_seconds !== undefined
 		const requestedElapsed = normaliseNonNegativeInteger(req.body?.elapsed_seconds)
-		const elapsed = hasElapsedOverride ? requestedElapsed : wasRunning ? liveElapsedSeconds(current) : Number(current.elapsed_seconds || 0)
+		const periodChanged = current.period !== period
+		let elapsed = hasElapsedOverride ? requestedElapsed : wasRunning ? liveElapsedSeconds(current) : Number(current.elapsed_seconds || 0)
+		if (status === 'No iniciado' || periodChanged) elapsed = 0
+		if (status === 'En juego' && elapsed >= duration.minutes * 60) status = period === `${duration.periods}/${duration.periods}` ? 'Finalizado' : 'Descanso'
+		const isRunning = status === 'En juego'
 		if (wasRunning && !isRunning) await pool.query('UPDATE match_player_stats SET time_on_court_seconds = time_on_court_seconds + IF(court_started_at IS NULL, 0, TIMESTAMPDIFF(SECOND, court_started_at, NOW())), court_started_at = NULL WHERE match_id = ? AND on_court = 1', [matchId])
-		if (!wasRunning && isRunning) await pool.query('UPDATE match_player_stats SET court_started_at = NOW() WHERE match_id = ? AND on_court = 1', [matchId])
-		const timerStartedAt = isRunning ? (hasElapsedOverride || !wasRunning ? new Date() : current.timer_started_at) : null
+		if ((!wasRunning && isRunning) || (periodChanged && isRunning)) await pool.query('UPDATE match_player_stats SET court_started_at = NOW() WHERE match_id = ? AND on_court = 1', [matchId])
+		const timerStartedAt = isRunning && status === 'En juego' ? (hasElapsedOverride || periodChanged || !wasRunning ? new Date() : current.timer_started_at) : null
 		const [result] = await pool.query('UPDATE match_tracking SET home_score = (SELECT COALESCE(SUM(goals), 0) FROM match_player_stats WHERE match_id = ?), visitor_score = (SELECT COALESCE(SUM(goals_conceded), 0) FROM match_player_stats WHERE match_id = ?), period = ?, match_status = ?, elapsed_seconds = ?, timer_started_at = ?, notes = ? WHERE match_id = ?', [matchId, matchId, period, status, elapsed, timerStartedAt, String(req.body?.notes || ''), matchId])
 		if (!result.affectedRows) return res.status(404).json({ error: 'El seguimiento no existe' })
 		const [rows] = await pool.query('SELECT home_score, visitor_score, period, match_status, elapsed_seconds, timer_started_at, notes FROM match_tracking WHERE match_id = ?', [matchId])

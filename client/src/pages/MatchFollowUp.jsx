@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
+import Swal from "sweetalert2";
 
 const statistics = [
   ["goals", "Goles"],
@@ -14,10 +15,28 @@ const statistics = [
   ["yellow_cards", "Tarjetas amarillas"],
   ["red_cards", "Expulsiones"],
   ["blue_cards", "Tarjetas azules"],
-  ["seven_meters", "7 m marcados/lanzados"],
+  ["seven_meters", "7 m OK/total"],
   ["seven_meters_received", "7 m recibidos"],
-  ["seven_meters_saved", "7 m recibidos parados"],
+  ["seven_meters_saved", "7m parado/total"],
   ["fouls", "Faltas"],
+];
+
+const statisticGroups = [
+  {
+    key: "attack",
+    label: "Ataque",
+    fields: ["goals", "shots", "assists", "turnovers", "seven_meters"],
+  },
+  {
+    key: "defense",
+    label: "Defensa",
+    fields: ["steals", "saves", "goals_conceded", "blocks", "seven_meters_received", "seven_meters_saved"],
+  },
+  {
+    key: "sanctions",
+    label: "Sanciones",
+    fields: ["exclusions_2min", "yellow_cards", "red_cards", "blue_cards", "fouls"],
+  },
 ];
 
 const shotZones = [
@@ -79,7 +98,11 @@ function secondsSinceDate(value, now = Date.now()) {
   return Math.max(0, Math.floor((now - new Date(value).getTime()) / 1000));
 }
 
-function PlayerCircle({ player, selected, onClick, compact = false }) {
+function periodEndStatus(period, periods) {
+  return period === `${periods}/${periods}` ? "Finalizado" : "Descanso";
+}
+
+function PlayerCircle({ player, selected, onClick, onPhotoClick, compact = false, bench = false }) {
   const name = `${player.nombre} ${player.apellidos || ""}`.trim();
   return (
     <button
@@ -89,7 +112,13 @@ function PlayerCircle({ player, selected, onClick, compact = false }) {
       aria-label={`Seleccionar estadísticas de ${name}`}
       title={`Ver estadísticas de ${name}`}
     >
-      <span className="player-circle-photo">
+      <span
+        className="player-circle-photo"
+        onClick={(event) => {
+          event.stopPropagation();
+          onPhotoClick?.(player);
+        }}
+      >
         {player.photo_data || player.photo_url ? (
           <img src={player.photo_data || player.photo_url} alt={name} />
         ) : player.numero ? (
@@ -99,6 +128,7 @@ function PlayerCircle({ player, selected, onClick, compact = false }) {
         )}
         {!compact && player.numero && <span className="player-circle-number">{player.numero}</span>}
       </span>
+      {bench && <span className="bench-chair" aria-hidden="true" />}
       <span className="player-circle-label">{name}</span>
     </button>
   );
@@ -158,6 +188,24 @@ function StatControl({ player, field, label, onChange, onShot, onSevenMeter }) {
   );
 }
 
+function PlayerStatsContextMenu({ onSelect }) {
+  return (
+    <div className="player-stats-context-menu" role="menu" aria-label="Grupo de estadísticas">
+      {statisticGroups.map((group) => (
+        <button
+          type="button"
+          key={group.key}
+          className={`context-menu-${group.key}`}
+          onClick={() => onSelect(group.key)}
+          role="menuitem"
+        >
+          {group.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function MatchFollowUp() {
   const matchId = new URLSearchParams(window.location.search).get("matchId");
   const [matches, setMatches] = useState([]);
@@ -171,6 +219,12 @@ export default function MatchFollowUp() {
     show: false,
     player: null,
     outcome: "goal",
+  });
+  const [statsContextPlayer, setStatsContextPlayer] = useState(null);
+  const [statsModal, setStatsModal] = useState({
+    show: false,
+    player: null,
+    group: "attack",
   });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -217,11 +271,16 @@ export default function MatchFollowUp() {
 
   async function saveTracking(changes) {
     const tracking = { ...followUp.tracking, ...changes };
+    if (changes.elapsed_seconds === undefined && followUp.tracking.match_status === "En juego") {
+      tracking.elapsed_seconds = Number(followUp.tracking.elapsed_seconds || 0) + clockSeconds;
+    }
     setFollowUp((current) => ({ ...current, tracking }));
     setSaving(true);
     try {
-      await axios.put(`/api/matches/${matchId}/follow-up`, tracking);
-      await loadFollowUp();
+      const response = await axios.put(`/api/matches/${matchId}/follow-up`, tracking);
+      setFollowUp((current) => ({ ...current, tracking: response.data }));
+      setClockSeconds(0);
+      setCourtClock(Date.now());
     } catch (err) {
       setError(
         err.response?.data?.error ||
@@ -231,6 +290,47 @@ export default function MatchFollowUp() {
       setSaving(false);
     }
   }
+
+  async function handleStatusChange(status) {
+    if (status === "No iniciado") {
+      const hasStarted = followUp.tracking.match_status !== "No iniciado" || Number(followUp.tracking.elapsed_seconds || 0) > 0;
+      if (hasStarted) {
+        const confirmation = await Swal.fire({
+          icon: "warning",
+          title: "¿Reiniciar el partido?",
+          text: "El reloj volverá a 0:00 y se detendrá el partido.",
+          showCancelButton: true,
+          confirmButtonText: "Sí, reiniciar",
+          cancelButtonText: "Cancelar",
+          confirmButtonColor: "#dc3545",
+        });
+        if (!confirmation.isConfirmed) return;
+      }
+      await saveTracking({ match_status: "No iniciado", elapsed_seconds: 0 });
+      return;
+    }
+    await saveTracking({ match_status: status });
+  }
+
+  async function handlePeriodChange(period) {
+    const nextStatus = period === "Descanso"
+      ? "Descanso"
+      : followUp.tracking.match_status === "Descanso"
+        ? "En juego"
+        : followUp.tracking.match_status;
+    await saveTracking({ period, match_status: nextStatus, elapsed_seconds: 0 });
+  }
+
+  useEffect(() => {
+    if (!followUp || followUp.tracking.match_status !== "En juego" || saving) return;
+    const limitSeconds = Number(followUp.duration?.minutes || 0) * 60;
+    const elapsed = Number(followUp.tracking.elapsed_seconds || 0) + clockSeconds;
+    if (!limitSeconds || elapsed < limitSeconds) return;
+    saveTracking({
+      match_status: periodEndStatus(followUp.tracking.period, followUp.duration.periods),
+      elapsed_seconds: limitSeconds,
+    });
+  }, [clockSeconds, followUp?.tracking?.match_status, followUp?.tracking?.period, followUp?.tracking?.elapsed_seconds, saving]);
 
   function beginClockEdit() {
     setClockInput(formatDuration(displayedClock));
@@ -281,6 +381,15 @@ export default function MatchFollowUp() {
       ),
     }));
     await savePlayer(updatedPlayer);
+  }
+
+  function openStatsMenu(player) {
+    setStatsContextPlayer((current) => current?.id === player.id ? null : player);
+  }
+
+  function openStatsGroup(group) {
+    setStatsModal({ show: true, player: statsContextPlayer, group });
+    setStatsContextPlayer(null);
   }
 
   async function toggleCourt(player) {
@@ -426,6 +535,8 @@ export default function MatchFollowUp() {
   const displayedClock = Number(tracking.elapsed_seconds || 0) + clockSeconds;
   const isRunning = tracking.match_status === "En juego";
   const isTimeout = tracking.match_status === "Tiempo muerto local" || tracking.match_status === "Tiempo muerto visitante";
+  const periodCount = duration.periods || 2;
+  const periodOptions = Array.from({ length: periodCount }, (_, index) => `${index + 1}/${periodCount}`).flatMap((period, index, periods) => index < periods.length - 1 ? [period, "Descanso"] : [period]);
 
   return (
     <div className="container-fluid mt-4 pb-4">
@@ -455,16 +566,34 @@ export default function MatchFollowUp() {
         </span>
       </div>
       {error && <div className="alert alert-danger">{error}</div>}
-      <div className="row g-3 mb-3">
-        <div className="col-lg-5">
-          <div className="card h-100">
+      <div className="row g-3 mb-3 match-control-row">
+        <div className="col-lg-4">
+          <div className="card h-100 match-follow-up-card" id="match-score-card">
             <div className="card-body text-center">
               <div className="small text-muted">Marcador</div>
               <div className="display-4 fw-bold">
                 {tracking.home_score} - {tracking.visitor_score}
               </div>
-              <div className="small text-muted d-flex justify-content-center align-items-center gap-2">
-                <span>{tracking.period}</span>
+              <div className="small text-muted">{match.home_team_name} · {match.visitor_name}</div>
+            </div>
+          </div>
+        </div>
+        <div className="col-lg-4">
+          <div className="card h-100 match-follow-up-card" id="match-clock-card">
+            <div className="card-body text-center">
+              <div className="small text-muted">Tiempo de juego</div>
+              <div className="display-5 fw-bold text-primary">{formatDuration(displayedClock)}</div>
+              <div className="d-flex justify-content-center align-items-center gap-2 mt-2">
+                <span className="small text-muted">Periodo</span>
+                <select
+                  id="match-period-select"
+                  className="form-select form-select-sm match-period-select"
+                  value={tracking.period}
+                  onChange={(event) => handlePeriodChange(event.target.value)}
+                  aria-label="Seleccionar periodo"
+                >
+                  {periodOptions.map((period, index) => <option key={`${period}-${index}`}>{period}</option>)}
+                </select>
                 {editingClock ? (
                   <span className="d-inline-flex align-items-center gap-1">
                     <input className="form-control form-control-sm match-clock-input" value={clockInput} onChange={(event) => setClockInput(event.target.value)} aria-label="Editar tiempo de juego" title="Editar tiempo de juego" />
@@ -475,62 +604,32 @@ export default function MatchFollowUp() {
                   <button type="button" className="btn btn-sm btn-link p-0 text-muted" onClick={beginClockEdit} aria-label="Editar tiempo de juego" title="Editar tiempo de juego"><i className="fa-solid fa-pen" aria-hidden="true" /></button>
                 )}
               </div>
-              <div className="display-5 fw-bold text-primary mt-2">{formatDuration(displayedClock)}</div>
-              <div className="small text-muted">Tiempo de juego</div>
+              <div className="form-text mt-2">Duración: {duration.label}. Pista: {onCourtPlayers.length}/7.</div>
             </div>
           </div>
         </div>
-        <div className="col-lg-7">
-          <div className="card h-100">
+        <div className="col-lg-4">
+          <div className="card h-100 match-follow-up-card" id="match-status-card">
             <div className="card-body">
-              <div className="row g-2 align-items-end">
-                <div className="col-md-4">
-                  <label className="form-label">Estado</label>
-                  <select
-                    className="form-select"
-                    value={tracking.match_status}
-                    onChange={(event) =>
-                      saveTracking({ match_status: event.target.value })
-                    }
-                  >
-                    <option>No iniciado</option>
-                    <option>En juego</option>
-                    <option>Descanso</option>
-                    <option>Tiempo muerto local</option>
-                    <option>Tiempo muerto visitante</option>
-                    <option>Finalizado</option>
-                  </select>
-                </div>
-                <div className="col-md-4">
-                  <label className="form-label">Periodo</label>
-                  <select
-                    className="form-select"
-                    value={tracking.period}
-                    onChange={(event) =>
-                      saveTracking({
-                        period: duration.periodFormat,
-                        match_status: event.target.value,
-                      })
-                    }
-                  >
-                    <option>No iniciado</option>
-                    <option>En juego</option>
-                    <option>Descanso</option>
-                    <option>Tiempo muerto local</option>
-                    <option>Tiempo muerto visitante</option>
-                    <option>Finalizado</option>
-                  </select>
-                </div>
-                <div className="col-md-4">
-                  {!isRunning && !isTimeout && tracking.match_status !== "Finalizado" && <button type="button" className="btn btn-success w-100" onClick={() => saveTracking({ match_status: "En juego", period: duration.periodFormat })} disabled={saving} aria-label="Iniciar partido" title="Iniciar partido"><i className="fa-solid fa-play me-1" aria-hidden="true" />Iniciar partido</button>}
-                  {isRunning && <div className="d-flex gap-1"><button type="button" className="btn btn-warning flex-fill" onClick={() => saveTracking({ match_status: "Tiempo muerto local" })} disabled={saving} aria-label="Tiempo muerto local" title="Tiempo muerto local"><i className="fa-solid fa-stopwatch me-1" aria-hidden="true" />Local</button><button type="button" className="btn btn-warning flex-fill" onClick={() => saveTracking({ match_status: "Tiempo muerto visitante" })} disabled={saving} aria-label="Tiempo muerto visitante" title="Tiempo muerto visitante"><i className="fa-solid fa-stopwatch me-1" aria-hidden="true" />Visitante</button></div>}
-                  {isTimeout && <button type="button" className="btn btn-success w-100" onClick={() => saveTracking({ match_status: "En juego" })} disabled={saving} aria-label="Reanudar partido" title="Reanudar partido"><i className="fa-solid fa-play me-1" aria-hidden="true" />Reanudar</button>}
-                  {(isRunning || isTimeout) && <button type="button" className="btn btn-outline-danger w-100 mt-1" onClick={() => saveTracking({ match_status: "Finalizado" })} disabled={saving} aria-label="Finalizar partido" title="Finalizar partido"><i className="fa-solid fa-flag-checkered me-1" aria-hidden="true" />Finalizar</button>}
-                </div>
-              </div>
-              <div className="form-text mt-3">
-                Duración automática por categoría: {duration.label}. Pista:{" "}
-                {onCourtPlayers.length}/7.
+              <label className="form-label" htmlFor="match-status-select">Estado</label>
+              <select
+                id="match-status-select"
+                className="form-select"
+                value={tracking.match_status}
+                onChange={(event) => handleStatusChange(event.target.value)}
+              >
+                <option>No iniciado</option>
+                <option>En juego</option>
+                <option>Descanso</option>
+                <option>Tiempo muerto local</option>
+                <option>Tiempo muerto visitante</option>
+                <option>Finalizado</option>
+              </select>
+              <div className="mt-2">
+                {!isRunning && !isTimeout && tracking.match_status !== "Finalizado" && <button type="button" className="btn btn-success w-100" onClick={() => saveTracking({ match_status: "En juego", period: periodOptions[0] })} disabled={saving} aria-label="Iniciar partido" title="Iniciar partido"><i className="fa-solid fa-play me-1" aria-hidden="true" />Iniciar partido</button>}
+                {isRunning && <div className="d-flex gap-1"><button type="button" className="btn btn-warning flex-fill" onClick={() => saveTracking({ match_status: "Tiempo muerto local" })} disabled={saving} aria-label="Tiempo muerto local" title="Tiempo muerto local"><i className="fa-solid fa-stopwatch me-1" aria-hidden="true" />Local</button><button type="button" className="btn btn-warning flex-fill" onClick={() => saveTracking({ match_status: "Tiempo muerto visitante" })} disabled={saving} aria-label="Tiempo muerto visitante" title="Tiempo muerto visitante"><i className="fa-solid fa-stopwatch me-1" aria-hidden="true" />Visitante</button></div>}
+                {isTimeout && <button type="button" className="btn btn-success w-100" onClick={() => saveTracking({ match_status: "En juego" })} disabled={saving} aria-label="Reanudar partido" title="Reanudar partido"><i className="fa-solid fa-play me-1" aria-hidden="true" />Reanudar</button>}
+                {(isRunning || isTimeout) && <button type="button" className="btn btn-outline-danger w-100 mt-1" onClick={() => saveTracking({ match_status: "Finalizado" })} disabled={saving} aria-label="Finalizar partido" title="Finalizar partido"><i className="fa-solid fa-flag-checkered me-1" aria-hidden="true" />Finalizar</button>}
               </div>
             </div>
           </div>
@@ -542,7 +641,7 @@ export default function MatchFollowUp() {
             <div className="card-header">
               <strong>En pista</strong>
             </div>
-            <div className="card-body">
+            <div className="card-body court-surface">
               <div className="player-circle-list">
                 {onCourtPlayers.map((player) => (
                   <div className="player-circle-item" key={player.id}>
@@ -551,7 +650,11 @@ export default function MatchFollowUp() {
                       compact
                       selected={player.id === selectedPlayerId}
                       onClick={() => setSelectedPlayerId(player.id)}
+                      onPhotoClick={openStatsMenu}
                     />
+                    {statsContextPlayer?.id === player.id && (
+                      <PlayerStatsContextMenu onSelect={openStatsGroup} />
+                    )}
                     <div className="player-circle-actions">
                       <button
                         type="button"
@@ -582,11 +685,14 @@ export default function MatchFollowUp() {
             <div className="card-header">
               <strong>Banquillo</strong>
             </div>
-            <div className="card-body">
+            <div className="card-body bench-surface">
               <div className="player-circle-list">
                 {benchPlayers.map((player) => (
-                  <div className="player-circle-item" key={player.id}>
-                    <PlayerCircle player={player} onClick={() => toggleCourt(player)} />
+                  <div className="player-circle-item bench-player-station" key={player.id}>
+                    <PlayerCircle player={player} bench onClick={() => toggleCourt(player)} onPhotoClick={openStatsMenu} />
+                    {statsContextPlayer?.id === player.id && (
+                      <PlayerStatsContextMenu onSelect={openStatsGroup} />
+                    )}
                     <div className="player-circle-actions">
                       <button
                         type="button"
@@ -619,15 +725,20 @@ export default function MatchFollowUp() {
           <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setSelectedPlayerId(null)} aria-label="Ocultar estadísticas" title="Ocultar estadísticas"><i className="fa-solid fa-eye-slash" aria-hidden="true" /></button>
         </div>
         <div className="table-responsive">
-          <table className="table table-sm table-bordered align-middle mb-0">
+          <table className="table table-sm table-bordered align-middle mb-0 statistics-table">
             <thead>
+              <tr className="statistics-group-row">
+                <th rowSpan="2">Jugador</th>
+                <th rowSpan="2">Tiempo en pista</th>
+                {statisticGroups.map((group) => (
+                  <th className={`statistics-group-${group.key}`} colSpan={group.fields.length} key={group.key}>
+                    {group.label}
+                  </th>
+                ))}
+              </tr>
               <tr>
-                <th>Jugador</th>
-                <th>Posición</th>
-                <th>Situación</th>
-                <th>Tiempo en pista</th>
                 {statistics.map(([, label]) => (
-                  <th key={label}>{label}</th>
+                  <th key={label} title={label}>{label}</th>
                 ))}
               </tr>
             </thead>
@@ -637,8 +748,6 @@ export default function MatchFollowUp() {
                     {selectedPlayer.numero ? `#${selectedPlayer.numero} ` : ""}
                     {selectedPlayer.nombre} {selectedPlayer.apellidos || ""}
                   </td>
-                  <td>{selectedPlayer.posicion || "Sin posición"}</td>
-                  <td>Pista</td>
                   <td className="text-nowrap">{formatDuration(Number(selectedPlayer.time_on_court_seconds || 0) + (isRunning ? secondsSinceDate(selectedPlayer.court_started_at, courtClock) : 0))}</td>
                   {statistics.map(([field, label]) => (
                     <td key={field}>
@@ -679,6 +788,52 @@ export default function MatchFollowUp() {
           </table>
         </div>
       </div>}
+      {statsModal.show && statsModal.player && (
+        <>
+          <div className="modal fade show d-block" tabIndex={-1} onClick={() => setStatsModal({ show: false, player: null, group: "attack" })}>
+            <div className="modal-dialog modal-lg modal-dialog-centered" onClick={(event) => event.stopPropagation()}>
+              <div className="modal-content player-stats-modal">
+                <div className="modal-header">
+                  <div>
+                    <h5 className="modal-title">{statisticGroups.find((group) => group.key === statsModal.group)?.label}</h5>
+                    <div className="small text-muted">{statsModal.player.nombre} {statsModal.player.apellidos || ""}</div>
+                  </div>
+                  <button type="button" className="btn-close" onClick={() => setStatsModal({ show: false, player: null, group: "attack" })} aria-label="Cerrar estadísticas" title="Cerrar estadísticas" />
+                </div>
+                <div className="modal-body">
+                  <div className="stats-control-grid">
+                    {statisticGroups.find((group) => group.key === statsModal.group)?.fields.map((field) => {
+                      const statistic = statistics.find(([itemField]) => itemField === field);
+                      if (!statistic) return null;
+                      const [, label] = statistic;
+                      const goalkeeperBlocked = isGoalkeeper(statsModal.player) && !goalkeeperStatistics.has(field);
+                      const fieldBlocked = !isGoalkeeper(statsModal.player) && ["saves", "goals_conceded"].includes(field);
+                      return (
+                        <div className="stats-control-item" key={field}>
+                          <span className="stats-control-label">{label}</span>
+                          {goalkeeperBlocked || fieldBlocked ? (
+                            <span className="text-muted" title="No aplicable">-</span>
+                          ) : (
+                            <StatControl
+                              player={statsModal.player}
+                              field={field}
+                              label={label}
+                              onChange={changePlayerStat}
+                              onShot={(player, eventType) => setShotModal({ show: true, player, eventType })}
+                              onSevenMeter={(player) => setSevenMeterModal({ show: true, player, outcome: "goal" })}
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="modal-backdrop fade show" />
+        </>
+      )}
       {shotModal.show && (
         <>
           <div
