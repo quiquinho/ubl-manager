@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+/.pnp.cjs
+/.pnp.loader.mjs
+client/node_modules/
+server/node_modules/
+server-local.log
+server-local-error.log
+.vscode/settings.json

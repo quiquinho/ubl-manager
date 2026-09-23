@@ -1,0 +1,8 @@
+services:
+  ublmanager-api:
+    build:
+      context: ./server
+    container_name: ublmanager-api
+    restart: always
+    ports:
+      - "4000:4000"

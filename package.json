@@ -1,0 +1,17 @@
+{
+  "name": "ublmanager",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "install-all": "npm install --prefix server && npm install --prefix client",
+    "dev": "concurrently \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
+    "start-server": "npm run dev --prefix server",
+    "start-client": "npm run dev --prefix client",
+    "build": "npm run build --prefix client",
+    "migrate": "node server/run_migration_node.js",
+    "query-db": "node server/query_db.js"
+  },
+  "devDependencies": {
+    "concurrently": "^8.0.0"
+  }
+}
