@@ -3,6 +3,11 @@ body { font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvet
 .topmenu ul { list-style: none; margin: 0; padding: 0; display: flex; gap: 16px }
 .topmenu a { color: #fff; text-decoration: none }
 
+.home-landing { display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 3rem 1.25rem; text-align: center; }
+.home-landing-logo { width: min(220px, 58vw); aspect-ratio: 1; object-fit: cover; border: 4px solid rgba(255, 255, 255, 0.85); border-radius: 12px; box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25); }
+.home-landing h1 { margin: 0; }
+.home-landing p { margin: 0; }
+
 select { padding: 6px; }
 
 /* Small adjustments for login */

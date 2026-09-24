@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
 import Cropper from 'react-easy-crop'
+import PlayerStatsModal from '../components/PlayerStatsModal'
 
 const MAX_PHOTO_DIMENSION = 512
 const MAX_INPUT_DIMENSION = 2048
@@ -74,6 +75,7 @@ export default function PlayersManage() {
   const [players, setPlayers] = useState([])
   const [teams, setTeams] = useState([])
   const [showModal, setShowModal] = useState(false)
+  const [statsPlayer, setStatsPlayer] = useState(null)
   const [editingPlayer, setEditingPlayer] = useState(null)
   const [form, setForm] = useState(emptyPlayer)
   const [cropState, setCropState] = useState({ source: null, crop: { x: 0, y: 0 }, zoom: 1, area: null })
@@ -115,6 +117,10 @@ export default function PlayersManage() {
     setError('')
     setNotice('')
     setShowModal(true)
+  }
+
+  function openStats(player) {
+    setStatsPlayer(player)
   }
 
   function closeModal() {
@@ -240,7 +246,7 @@ export default function PlayersManage() {
               <td>{player.teams.map(team => team.name).join(', ') || '-'}</td>
               <td>{player.posicion}</td>
               <td>{player.numero}</td>
-              <td><button className="btn btn-sm btn-outline-secondary" onClick={() => openEdit(player)} aria-label="Editar jugador" title="Editar jugador"><i className="fa-solid fa-pen" aria-hidden="true" /></button></td>
+              <td><button className="btn btn-sm btn-outline-info me-1" onClick={() => openStats(player)} aria-label="Ver estadísticas acumuladas" title="Ver estadísticas acumuladas"><i className="fa-solid fa-chart-column" aria-hidden="true" /></button><button className="btn btn-sm btn-outline-secondary" onClick={() => openEdit(player)} aria-label="Editar jugador" title="Editar jugador"><i className="fa-solid fa-pen" aria-hidden="true" /></button></td>
             </tr>
           ))}
           {!visiblePlayers.length && <tr><td colSpan="7" className="text-center text-muted py-4">No hay jugadores que coincidan con los filtros.</td></tr>}
@@ -271,6 +277,8 @@ export default function PlayersManage() {
           <div className="modal-backdrop fade show"></div>
         </>
       )}
+
+      {statsPlayer && <PlayerStatsModal player={statsPlayer} teams={teams} onClose={() => setStatsPlayer(null)} />}
 
       {cropState.source && (
         <>

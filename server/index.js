@@ -2,8 +2,9 @@ const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
 const dotenv = require('dotenv');
+const path = require('path');
 
-dotenv.config();
+dotenv.config({ path: path.join(__dirname, '.env') });
 
 const app = express();
 app.use(cors());
@@ -14,6 +15,10 @@ const DB_USER = process.env.DB_USER || 'cynthia_user';
 const DB_PASS = process.env.DB_PASS || '';
 const DB_NAME = process.env.DB_NAME || 'cynthia_app';
 const DB_PORT = process.env.DB_PORT || 3306;
+
+if (!process.env.DB_PASS) {
+	throw new Error('Falta DB_PASS. Configura la contraseña en server/.env o en las variables del entorno.');
+}
 
 let pool;
 async function initDb() {
@@ -453,6 +458,81 @@ app.get('/api/matches/:matchId/statistics', async (req, res) => {
 	} catch (err) {
 		console.error(err)
 		res.status(500).json({ error: 'No se pudieron cargar las estadísticas del partido' })
+	}
+})
+
+app.get('/api/players/:playerId/statistics', async (req, res) => {
+	const playerId = Number(req.params.playerId)
+	const teamId = Number(req.query.teamId || 0)
+	const category = String(req.query.category || '').trim()
+	const from = String(req.query.from || '').trim()
+	const to = String(req.query.to || '').trim()
+	if (!playerId) return res.status(400).json({ error: 'Jugador no válido' })
+	if (teamId && !Number.isInteger(teamId)) return res.status(400).json({ error: 'Equipo no válido' })
+	if ((from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) || (to && !/^\d{4}-\d{2}-\d{2}$/.test(to))) {
+		return res.status(400).json({ error: 'Rango de fechas no válido' })
+	}
+	try {
+		const conditions = ['p.id = ?']
+		const parameters = [playerId]
+		if (teamId) {
+			conditions.push('t.id = ?')
+			parameters.push(teamId)
+		}
+		if (category) {
+			conditions.push('t.category = ?')
+			parameters.push(category)
+		}
+		if (from) {
+			conditions.push('m.scheduled_at >= ?')
+			parameters.push(`${from} 00:00:00`)
+		}
+		if (to) {
+			conditions.push('m.scheduled_at < DATE_ADD(?, INTERVAL 1 DAY)')
+			parameters.push(`${to} 00:00:00`)
+		}
+		const [rows] = await pool.query(`SELECT p.id, p.nombre, p.apellidos, p.numero, p.posicion,
+			COUNT(DISTINCT m.id) AS matches,
+			COALESCE(SUM(s.time_on_court_seconds), 0) AS time_on_court_seconds,
+			COALESCE(SUM(s.goals), 0) AS goals, COALESCE(SUM(s.shots), 0) AS shots,
+			COALESCE(SUM(s.assists), 0) AS assists, COALESCE(SUM(s.turnovers), 0) AS turnovers,
+			COALESCE(SUM(s.steals), 0) AS steals, COALESCE(SUM(s.saves), 0) AS saves,
+			COALESCE(SUM(s.goals_conceded), 0) AS goals_conceded, COALESCE(SUM(s.blocks), 0) AS blocks,
+			COALESCE(SUM(s.exclusions_2min), 0) AS exclusions_2min, COALESCE(SUM(s.yellow_cards), 0) AS yellow_cards,
+			COALESCE(SUM(s.red_cards), 0) AS red_cards, COALESCE(SUM(s.blue_cards), 0) AS blue_cards,
+			COALESCE(SUM(s.seven_meters_scored), 0) AS seven_meters_scored,
+			COALESCE(SUM(s.seven_meters_attempted), 0) AS seven_meters_attempted,
+			COALESCE(SUM(s.seven_meters_received), 0) AS seven_meters_received,
+			COALESCE(SUM(s.seven_meters_saved), 0) AS seven_meters_saved,
+			COALESCE(SUM(s.fouls), 0) AS fouls
+			FROM players p
+			LEFT JOIN match_players mp ON mp.player_id = p.id
+			LEFT JOIN matches m ON m.id = mp.match_id
+			LEFT JOIN teams t ON t.id = m.home_team_id
+			LEFT JOIN match_player_stats s ON s.match_id = mp.match_id AND s.player_id = p.id
+			WHERE ${conditions.join(' AND ')}
+			GROUP BY p.id, p.nombre, p.apellidos, p.numero, p.posicion`, parameters)
+		if (!rows.length) return res.status(404).json({ error: 'El jugador no existe' })
+		const eventConditions = conditions.filter(condition => condition !== 'p.id = ?')
+		const eventParameters = parameters.slice(1)
+		const [events] = await pool.query(`SELECT e.event_type AS action, e.zone, e.created_at
+			FROM match_shot_events e
+			JOIN matches m ON m.id = e.match_id
+			JOIN teams t ON t.id = m.home_team_id
+			JOIN players p ON p.id = e.player_id
+			WHERE p.id = ?${eventConditions.length ? ` AND ${eventConditions.join(' AND ')}` : ''}
+			UNION ALL
+			SELECT e.stat_key AS action, e.zone, e.created_at
+			FROM match_stat_events e
+			JOIN matches m ON m.id = e.match_id
+			JOIN teams t ON t.id = m.home_team_id
+			JOIN players p ON p.id = e.player_id
+			WHERE p.id = ? AND e.stat_key LIKE 'seven_meter_%'${eventConditions.length ? ` AND ${eventConditions.join(' AND ')}` : ''}
+			ORDER BY created_at`, [playerId, ...eventParameters, playerId, ...eventParameters])
+		res.json({ player: rows[0], events, filters: { teamId: teamId || '', category, from, to } })
+	} catch (err) {
+		console.error(err)
+		res.status(500).json({ error: 'No se pudieron cargar las estadísticas acumuladas' })
 	}
 })
 
