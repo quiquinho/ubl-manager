@@ -10,13 +10,12 @@ const statistics = [
   ["turnovers", "Pérdidas"],
   ["steals", "Robos"],
   ["saves", "Paradas"],
-  ["goals_conceded", "Goles recibidos"],
   ["blocks", "Bloqueos"],
   ["exclusions_2min", "Exclusiones 2 min"],
   ["yellow_cards", "Tarjetas amarillas"],
   ["red_cards", "Expulsiones"],
   ["blue_cards", "Tarjetas azules"],
-  ["seven_meters", "7 m OK/total"],
+  ["seven_meters", "7m A favor"],
   ["seven_meters_received", "7 m recibidos"],
   ["seven_meters_saved", "7m parado/total"],
   ["fouls", "Faltas"],
@@ -31,7 +30,7 @@ const statisticGroups = [
   {
     key: "defense",
     label: "Defensa",
-    fields: ["steals", "saves", "goals_conceded", "blocks", "seven_meters_received", "seven_meters_saved"],
+    fields: ["steals", "saves", "blocks", "seven_meters_received", "seven_meters_saved"],
   },
   {
     key: "sanctions",
@@ -52,9 +51,17 @@ const shotZones = [
   ["bottom-right", "Cuadrante abajo derecha"],
 ];
 
+const historyActionLabels = {
+  goal: "Gol", outside: "Parada", save: "Parada", conceded: "Gol recibido",
+  assists: "Asistencia", turnovers: "Pérdida", steals: "Recuperación", blocks: "Bloqueo",
+  exclusions_2min: "Exclusión 2 min", yellow_cards: "Tarjeta amarilla", red_cards: "Expulsión",
+  blue_cards: "Tarjeta azul", fouls: "Falta", seven_meter_goal: "7m Gol", seven_meter_save: "7m Parada", seven_meter_outside: "7m Fuera",
+};
+
 const goalkeeperStatistics = new Set([
+  "goals",
+  "shots",
   "saves",
-  "goals_conceded",
   "assists",
   "turnovers",
   "steals",
@@ -139,70 +146,49 @@ function StatControl({ player, field, label, onChange, onShot, onSevenMeter }) {
   if (field === "seven_meters") {
     return (
       <button type="button" className="btn btn-sm btn-outline-primary text-nowrap" onClick={() => onSevenMeter(player)} aria-label="Registrar lanzamiento de 7 metros" title="Registrar lanzamiento de 7 metros">
-        <span className="badge text-bg-light border">
-          {player.seven_meters_scored || 0}/{player.seven_meters_attempted || 0}
-        </span>
+        <i className="fa-solid fa-bullseye me-1" aria-hidden="true" />{player.seven_meters_scored || 0}/{player.seven_meters_attempted || 0}
       </button>
     );
   }
-  if (field === "goals" || field === "saves" || field === "goals_conceded") {
-    const eventType =
-      field === "goals" ? "goal" : field === "saves" ? "save" : "conceded";
+  if (field === "shots") {
     return (
-      <button
-        type="button"
-        className="btn btn-sm btn-outline-primary text-nowrap"
-        onClick={() => onShot(player, eventType)}
-        aria-label={`Registrar ${label}`}
-        title={`Registrar ${label}`}
-      >
-        <i
-          className={`fa-solid ${eventType === "goal" ? "fa-bullseye" : "fa-shield-halved"} me-1`}
-          aria-hidden="true"
-        />
-        {player[field] || 0}
+      <button type="button" className="btn btn-sm btn-outline-primary text-nowrap" onClick={() => onShot(player, "attack")} aria-label="Registrar lanzamiento" title="Registrar lanzamiento">
+        <i className="fa-solid fa-bullseye me-1" aria-hidden="true" />{player.goals || 0}/{player.shots || 0}
+      </button>
+    );
+  }
+  if (field === "goals_conceded") return <span className="badge text-bg-light border">{player.goals_conceded || 0}</span>;
+  if (field === "goals" || field === "saves") {
+    const eventType = field === "goals" ? "goal" : "defense";
+    return (
+      <button type="button" className="btn btn-sm btn-outline-primary text-nowrap" onClick={() => onShot(player, eventType)} aria-label={`Registrar ${label}`} title={`Registrar ${label}`}>
+        <i className={`fa-solid ${eventType === "goal" ? "fa-bullseye" : "fa-shield-halved"} me-1`} aria-hidden="true" />{player[field] || 0}
       </button>
     );
   }
   return (
     <div className="d-flex align-items-center gap-1">
       <span className="badge text-bg-light border">{player[field] || 0}</span>
-      <button
-        type="button"
-        className="btn btn-sm btn-outline-secondary py-0 px-1"
-        onClick={() => onChange(player, field, -1)}
-        aria-label={`Restar ${label}`}
-        title={`Restar ${label}`}
-      >
-        <i className="fa-solid fa-minus" aria-hidden="true" />
-      </button>
-      <button
-        type="button"
-        className="btn btn-sm btn-outline-primary py-0 px-1"
-        onClick={() => onChange(player, field, 1)}
-        aria-label={`Añadir ${label}`}
-        title={`Añadir ${label}`}
-      >
-        <i className="fa-solid fa-plus" aria-hidden="true" />
-      </button>
+      <button type="button" className="btn btn-sm btn-outline-secondary py-0 px-1" onClick={() => onChange(player, field, -1)} aria-label={`Restar ${label}`} title={`Restar ${label}`}><i className="fa-solid fa-minus" aria-hidden="true" /></button>
+      <button type="button" className="btn btn-sm btn-outline-primary py-0 px-1" onClick={() => onChange(player, field, 1)} aria-label={`Añadir ${label}`} title={`Añadir ${label}`}><i className="fa-solid fa-plus" aria-hidden="true" /></button>
     </div>
   );
 }
 
-function PlayerStatsContextMenu({ onSelect }) {
+function PlayerStatsContextMenu({ onSelect, onQuickAction, bench, onMoveToCourt }) {
   return (
     <div className="player-stats-context-menu" role="menu" aria-label="Grupo de estadísticas">
-      {statisticGroups.map((group) => (
-        <button
-          type="button"
-          key={group.key}
-          className={`context-menu-${group.key}`}
-          onClick={() => onSelect(group.key)}
-          role="menuitem"
-        >
-          {group.label}
+      {bench ? (
+        <button type="button" className="context-menu-quick" onClick={onMoveToCourt} role="menuitem">A pista</button>
+      ) : <>
+      <button type="button" className="context-menu-attack context-menu-quick" onClick={() => onQuickAction("shots")} role="menuitem">Lanzamientos</button>
+      <button type="button" className="context-menu-attack context-menu-quick" onClick={() => onQuickAction("assists")} role="menuitem">Asistencias</button>
+      {statisticGroups.map((item) => (
+        <button type="button" key={item.key} className={`context-menu-${item.key}`} onClick={() => onSelect(item.key)} role="menuitem">
+          {item.label}
         </button>
       ))}
+      </>}
     </div>
   );
 }
@@ -214,27 +200,43 @@ export default function MatchFollowUp() {
   const [shotModal, setShotModal] = useState({
     show: false,
     player: null,
-    eventType: "goal",
+    eventType: "attack",
+    zone: null,
   });
   const [sevenMeterModal, setSevenMeterModal] = useState({
     show: false,
     player: null,
     outcome: "goal",
+    zone: null,
   });
   const [statsContextPlayer, setStatsContextPlayer] = useState(null);
+  const [benchContextPlayer, setBenchContextPlayer] = useState(null);
   const [statsModal, setStatsModal] = useState({
     show: false,
     player: null,
     group: "attack",
   });
   const [showMatchStatsModal, setShowMatchStatsModal] = useState(false);
+  const [historyModal, setHistoryModal] = useState({ show: false, events: [], loading: false });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [clockSeconds, setClockSeconds] = useState(0);
   const [courtClock, setCourtClock] = useState(() => Date.now());
   const [selectedPlayerId, setSelectedPlayerId] = useState(null);
+  const [sanctionedPlayers, setSanctionedPlayers] = useState([]);
   const [editingClock, setEditingClock] = useState(false);
   const [clockInput, setClockInput] = useState('00:00');
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setSanctionedPlayers(current => current.map(item => {
+        if (!item.running || item.remaining <= 0) return item
+        const remaining = Math.max(0, item.remaining - 1)
+        return { ...item, remaining, running: remaining > 0 }
+      }))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   useEffect(() => {
     if (matchId) loadFollowUp();
@@ -338,6 +340,11 @@ export default function MatchFollowUp() {
     }
   }
 
+  function adjustGameClock(delta) {
+    const currentSeconds = Number(followUp?.tracking?.elapsed_seconds || 0) + clockSeconds;
+    saveTracking({ elapsed_seconds: Math.max(0, currentSeconds + delta) });
+  }
+
   async function handleStatusChange(status) {
     if (status === "No iniciado") {
       const hasStarted = followUp.tracking.match_status !== "No iniciado" || Number(followUp.tracking.elapsed_seconds || 0) > 0;
@@ -416,6 +423,68 @@ export default function MatchFollowUp() {
     }
   }
 
+  function showStatNotice(player, statistic, positive) {
+    const name = `${player.nombre} ${player.apellidos || ""}`.trim();
+    Swal.fire({
+      toast: true,
+      position: "top-end",
+      icon: positive ? "success" : "error",
+      title: `${name}: ${statistic}`,
+      showConfirmButton: false,
+      timer: 1800,
+      timerProgressBar: true,
+    });
+  }
+
+  function addTwoMinuteSanction(player) {
+    setSanctionedPlayers(current => current.some(item => item.playerId === player.id)
+      ? current
+      : [...current, { playerId: player.id, playerName: `${player.nombre} ${player.apellidos || ""}`.trim(), remaining: 120, running: false }])
+  }
+
+  function formatSanctionTime(seconds) {
+    return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`
+  }
+
+  async function askSanctionTime(item) {
+    const currentMinutes = Math.floor(displayedClock / 60)
+    const currentSeconds = displayedClock % 60
+    const result = await Swal.fire({
+      title: "Momento de la sanción",
+      width: 620,
+      html: `<p class="text-muted text-start mb-3">Se sumarán 2 minutos al tiempo de juego para calcular la vuelta.</p><div class="row g-3 text-start"><div class="col-6"><label class="form-label" for="sanction-minute">Minuto de juego</label><input id="sanction-minute" class="swal2-input m-0 w-100" type="number" min="0" value="${currentMinutes}"></div><div class="col-6"><label class="form-label" for="sanction-second">Segundo de juego</label><input id="sanction-second" class="swal2-input m-0 w-100" type="number" min="0" max="59" value="${String(currentSeconds).padStart(2, "0")}"></div></div>`,
+      showCancelButton: true,
+      confirmButtonText: "Marcar 2 minutos",
+      cancelButtonText: "Cancelar",
+      focusConfirm: false,
+      preConfirm: () => {
+        const minute = Number(document.getElementById("sanction-minute")?.value)
+        const second = Number(document.getElementById("sanction-second")?.value)
+        if (!Number.isInteger(minute) || minute < 0 || !Number.isInteger(second) || second < 0 || second > 59) {
+          Swal.showValidationMessage("Introduce un minuto válido y segundos entre 0 y 59")
+          return null
+        }
+        return { minute, second }
+      },
+    })
+    if (!result.isConfirmed || !result.value) return
+    const returnAt = result.value.minute * 60 + result.value.second + 120
+    setSanctionedPlayers(current => current.map(entry => entry.playerId === item.playerId ? { ...entry, remaining: 120, returnAt, running: false } : entry))
+  }
+
+  function toggleSanctionTimer(item) {
+    if (item.running) {
+      setSanctionedPlayers(current => current.map(entry => entry.playerId === item.playerId ? { ...entry, running: false } : entry))
+      return
+    }
+    if (item.remaining <= 0) return
+    setSanctionedPlayers(current => current.map(entry => entry.playerId === item.playerId ? { ...entry, running: true } : entry))
+  }
+
+  function editSanctionReturnTime(item) {
+    askSanctionTime(item)
+  }
+
   async function changePlayerStat(player, field, amount) {
     const updatedPlayer = {
       ...player,
@@ -436,11 +505,51 @@ export default function MatchFollowUp() {
       ),
     }));
     setStatsModal((current) => current.player?.id === player.id ? { ...current, player: updatedPlayer } : current);
-    await savePlayer(updatedPlayer);
+    const savedPlayer = await savePlayer(updatedPlayer);
+    if (savedPlayer) {
+      if (field === "exclusions_2min" && amount > 0) addTwoMinuteSanction(player)
+      showStatNotice(player, amount > 0 ? `+${amount} ${field}` : `${amount} ${field}`, amount > 0);
+    }
   }
 
   function openStatsMenu(player) {
     setStatsContextPlayer((current) => current?.id === player.id ? null : player);
+  }
+
+  async function openHistory() {
+    setHistoryModal({ show: true, events: [], loading: true });
+    try {
+      const response = await axios.get(`/api/matches/${matchId}/follow-up/history`);
+      setHistoryModal({ show: true, events: response.data, loading: false });
+    } catch (err) {
+      setHistoryModal({ show: true, events: [], loading: false });
+      setError(err.response?.data?.error || "No se pudo cargar el historial.");
+    }
+  }
+
+  async function deleteHistoryEvent(event) {
+    const result = await Swal.fire({
+      icon: "warning",
+      title: "¿Borrar acción?",
+      text: `${event.player_name} · ${historyActionLabels[event.action] || event.action}`,
+      showCancelButton: true,
+      confirmButtonText: "Borrar",
+      cancelButtonText: "Cancelar",
+      confirmButtonColor: "#dc3545",
+    });
+    if (!result.isConfirmed) return;
+    try {
+      await axios.delete(`/api/matches/${matchId}/follow-up/history/${event.id}`);
+      await loadFollowUp();
+      setHistoryModal(current => ({ ...current, events: current.events.filter(item => item.id !== event.id) }));
+      Swal.fire({ toast: true, position: "top-end", icon: "success", title: "Acción borrada", showConfirmButton: false, timer: 1500 });
+    } catch (err) {
+      Swal.fire({ icon: "error", title: "No se pudo borrar", text: err.response?.data?.error || "Inténtalo de nuevo." });
+    }
+  }
+
+  function openBenchMenu(player) {
+    setBenchContextPlayer((current) => current?.id === player.id ? null : player);
   }
 
   function openStatsGroup(group) {
@@ -448,8 +557,20 @@ export default function MatchFollowUp() {
     setStatsContextPlayer(null);
   }
 
+  function openQuickAttackAction(action) {
+    const player = statsContextPlayer;
+    setStatsContextPlayer(null);
+    if (action === "shots") {
+      setShotModal({ show: true, player, eventType: isGoalkeeper(player) ? "defense" : "attack", zone: null });
+      return;
+    }
+    changePlayerStat(player, action, 1);
+  }
+
   async function toggleCourt(player) {
     const onCourt = !Boolean(player.on_court);
+    setStatsContextPlayer(null);
+    setBenchContextPlayer(null);
     if (onCourt && followUp.players.filter((item) => item.on_court).length >= 7)
       return setError("No puede haber más de 7 jugadores en pista.");
     const updatedPlayer = { ...player, on_court: onCourt ? 1 : 0 };
@@ -471,21 +592,28 @@ export default function MatchFollowUp() {
     if (!onCourt) setSelectedPlayerId((current) => current === player.id ? null : current);
   }
 
-  async function registerShot(zone) {
+  async function registerShot(result, selectedZone = shotModal.zone) {
     const { player, eventType } = shotModal;
+    const storedEventType = eventType === "attack" || eventType === "defense" ? result : eventType;
+    if (eventType === "defense" && result === "outside") {
+      setShotModal({ show: false, player: null, eventType: "attack", zone: null });
+      return;
+    }
     try {
       await axios.post(
         `/api/matches/${matchId}/follow-up/players/${player.id}/shots`,
-        { event_type: eventType, zone },
+        { event_type: storedEventType, zone: selectedZone },
       );
-      const shotField = eventType === "goal" ? "goals" : eventType === "conceded" ? "goals_conceded" : "saves";
+      const shotField = storedEventType === "goal" ? "goals" : storedEventType === "conceded" ? "goals_conceded" : storedEventType === "save" ? "saves" : "shots";
       const updatedPlayer = { ...player, [shotField]: Number(player[shotField] || 0) + 1 };
       setFollowUp((current) => ({
         ...current,
         players: current.players.map((item) => item.id === player.id ? { ...item, ...updatedPlayer } : item),
       }));
       setStatsModal((current) => current.player?.id === player.id ? { ...current, player: updatedPlayer } : current);
-      setShotModal({ show: false, player: null, eventType: "goal" });
+      const statistic = storedEventType === "goal" ? "Gol" : storedEventType === "save" || storedEventType === "outside" ? "Parada" : "Gol recibido";
+      showStatNotice(player, statistic, storedEventType === "goal" || storedEventType === "save");
+      setShotModal({ show: false, player: null, eventType: "attack", zone: null });
       await loadFollowUp();
     } catch (err) {
       setError(
@@ -495,14 +623,15 @@ export default function MatchFollowUp() {
     }
   }
 
-  async function registerSevenMeter(zone) {
-    const { player, outcome } = sevenMeterModal;
+  async function registerSevenMeter(result = sevenMeterModal.outcome, selectedZone = sevenMeterModal.zone) {
+    const { player } = sevenMeterModal;
     try {
       await axios.post(
         `/api/matches/${matchId}/follow-up/players/${player.id}/seven-meters`,
-        { outcome, zone },
+        { outcome: result, zone: selectedZone },
       );
-      setSevenMeterModal({ show: false, player: null, outcome: "goal" });
+      showStatNotice(player, `7 metros: ${result === "goal" ? "Gol" : result === "save" ? "Parada" : "Fuera"}`, result === "goal");
+      setSevenMeterModal({ show: false, player: null, outcome: "goal", zone: null });
       await loadFollowUp();
     } catch (err) {
       setError(
@@ -615,11 +744,11 @@ export default function MatchFollowUp() {
 
   return (
     <div className="container-fluid mt-4 pb-4">
-      <div className="d-flex justify-content-between align-items-start mb-3">
-        <div>
+      <div className="d-flex flex-wrap align-items-center gap-2 mb-3">
+        <div className="d-flex flex-wrap align-items-center gap-2 flex-grow-1">
           <button
             type="button"
-            className="btn btn-sm btn-outline-secondary mb-2"
+            className="btn btn-sm btn-outline-secondary"
             onClick={() => {
               window.location.href = "/partido/seguimiento";
             }}
@@ -628,7 +757,7 @@ export default function MatchFollowUp() {
           >
             <i className="fa-solid fa-arrow-left" aria-hidden="true" />
           </button>
-          <h2 className="mb-1">
+          <h2 className="mb-0">
             <span>
               {match.home_team_name}
               {tracking.match_status === "Tiempo muerto local" && (
@@ -651,12 +780,13 @@ export default function MatchFollowUp() {
               )}
             </span>
           </h2>
-          <button type="button" className="btn btn-sm btn-outline-info mt-2" onClick={() => setShowMatchStatsModal(true)} aria-label="Ver estadisticas completas del partido" title="Ver estadisticas completas del partido"><i className="fa-solid fa-chart-column me-1" aria-hidden="true" />Estadisticas</button>
-          <p className="text-muted mb-0">
+          <button type="button" className="btn btn-sm btn-outline-info" onClick={() => setShowMatchStatsModal(true)} aria-label="Ver estadisticas completas del partido" title="Ver estadisticas completas del partido"><i className="fa-solid fa-chart-column me-1" aria-hidden="true" />Estadisticas</button>
+          <p className="text-muted mb-0 text-nowrap">
             {formatDate(match.scheduled_at)} · {formatTime(match.scheduled_at)}{" "}
             · {match.venue_name}
           </p>
         </div>
+        <button type="button" className="btn btn-sm btn-outline-secondary" onClick={openHistory} aria-label="Ver historial de acciones" title="Ver historial de acciones"><i className="fa-solid fa-clock-rotate-left me-1" aria-hidden="true" />Historial</button>
         <span className="badge text-bg-light border fs-6">
           {duration.label}
         </span>
@@ -678,7 +808,11 @@ export default function MatchFollowUp() {
           <div className="card h-100 match-follow-up-card" id="match-clock-card">
             <div className="card-body text-center">
               <div className="small text-muted">Tiempo de juego</div>
-              <div className="display-5 fw-bold text-primary">{formatDuration(displayedClock)}</div>
+              <div className="d-flex justify-content-center align-items-center gap-2">
+                <div className="btn-group btn-group-sm" role="group" aria-label="Ajustar minutos"><button type="button" className="btn btn-outline-secondary" onClick={() => adjustGameClock(-60)} aria-label="Restar un minuto" title="Restar un minuto">−</button><button type="button" className="btn btn-outline-secondary" onClick={() => adjustGameClock(60)} aria-label="Sumar un minuto" title="Sumar un minuto">+</button></div>
+                <div className="display-5 fw-bold text-primary">{formatDuration(displayedClock)}</div>
+                <div className="btn-group btn-group-sm" role="group" aria-label="Ajustar segundos"><button type="button" className="btn btn-outline-secondary" onClick={() => adjustGameClock(-1)} aria-label="Restar un segundo" title="Restar un segundo">−</button><button type="button" className="btn btn-outline-secondary" onClick={() => adjustGameClock(1)} aria-label="Sumar un segundo" title="Sumar un segundo">+</button></div>
+              </div>
               <div className="d-flex justify-content-center align-items-center gap-2 mt-2">
                 <span className="small text-muted">Periodo</span>
                 <select
@@ -707,22 +841,10 @@ export default function MatchFollowUp() {
         <div className="col-lg-4">
           <div className="card h-100 match-follow-up-card" id="match-status-card">
             <div className="card-body">
-              <label className="form-label" htmlFor="match-status-select">Estado</label>
-              <select
-                id="match-status-select"
-                className="form-select"
-                value={tracking.match_status}
-                onChange={(event) => handleStatusChange(event.target.value)}
-              >
-                <option>No iniciado</option>
-                <option>En juego</option>
-                <option>Descanso</option>
-                <option>Tiempo muerto local</option>
-                <option>Tiempo muerto visitante</option>
-                <option>Finalizado</option>
-              </select>
+              <div className="small text-muted mb-2">Estado: {tracking.match_status}</div>
               <div className="mt-2">
-                {!isRunning && !isTimeout && tracking.match_status !== "Finalizado" && <button type="button" className="btn btn-success w-100" onClick={() => saveTracking({ match_status: "En juego", period: periodOptions[0] })} disabled={saving} aria-label="Iniciar partido" title="Iniciar partido"><i className="fa-solid fa-play me-1" aria-hidden="true" />Iniciar partido</button>}
+                {!isRunning && !isTimeout && tracking.match_status !== "Finalizado" && <button type="button" className="btn btn-success w-100" onClick={() => saveTracking({ match_status: "En juego", period: periodOptions[0] })} disabled={saving} aria-label="Iniciar partido" title="Iniciar partido"><i className="fa-solid fa-play me-1" aria-hidden="true" />Inicio</button>}
+                {isRunning && <button type="button" className="btn btn-warning w-100 mb-2" onClick={() => saveTracking({ match_status: "Descanso" })} disabled={saving} aria-label="Pausar partido" title="Pausar partido"><i className="fa-solid fa-pause me-1" aria-hidden="true" />Pausa</button>}
                 {isRunning && <div className="d-flex gap-1"><button type="button" className="btn btn-warning flex-fill" onClick={() => saveTracking({ match_status: "Tiempo muerto local" })} disabled={saving} aria-label={`Tiempo muerto ${match.home_team_name}`} title={`Tiempo muerto ${match.home_team_name}`}><i className="fa-solid fa-stopwatch me-1" aria-hidden="true" />{match.home_team_name}</button><button type="button" className="btn btn-warning flex-fill" onClick={() => saveTracking({ match_status: "Tiempo muerto visitante" })} disabled={saving} aria-label={`Tiempo muerto ${match.visitor_name}`} title={`Tiempo muerto ${match.visitor_name}`}><i className="fa-solid fa-stopwatch me-1" aria-hidden="true" />{match.visitor_name}</button></div>}
                 {isTimeout && <button type="button" className="btn btn-success w-100" onClick={resumeMatch} disabled={saving} aria-label="Reanudar partido" title="Reanudar partido"><i className="fa-solid fa-play me-1" aria-hidden="true" />Reanudar</button>}
                 {(isRunning || isTimeout) && <button type="button" className="btn btn-outline-danger w-100 mt-1" onClick={() => saveTracking({ match_status: "Finalizado" })} disabled={saving} aria-label="Finalizar partido" title="Finalizar partido"><i className="fa-solid fa-flag-checkered me-1" aria-hidden="true" />Finalizar</button>}
@@ -749,18 +871,18 @@ export default function MatchFollowUp() {
                       onPhotoClick={openStatsMenu}
                     />
                     {statsContextPlayer?.id === player.id && (
-                      <PlayerStatsContextMenu onSelect={openStatsGroup} />
+                      <PlayerStatsContextMenu onSelect={openStatsGroup} onQuickAction={openQuickAttackAction} />
                     )}
                     <div className="player-circle-actions">
                       <button
                         type="button"
-                        className="btn btn-sm btn-outline-secondary py-0 px-2"
+                        className="btn btn-sm btn-danger py-0 px-2"
                         onClick={() => toggleCourt(player)}
                         aria-label="Enviar al banquillo"
                         title="Enviar al banquillo"
                       >
                         <i
-                          className="fa-solid fa-arrow-down"
+                          className="fa-solid fa-arrow-right"
                           aria-hidden="true"
                         />
                       </button>
@@ -768,7 +890,8 @@ export default function MatchFollowUp() {
                   </div>
                 ))}
                 {!onCourtPlayers.length && (
-                  <div className="text-muted">
+                  <div className="alert alert-warning text-center w-100 mb-0 empty-court-notice">
+                    <i className="fa-solid fa-triangle-exclamation me-2" aria-hidden="true" />
                     Selecciona jugadores del banquillo para comenzar.
                   </div>
                 )}
@@ -785,20 +908,20 @@ export default function MatchFollowUp() {
               <div className="player-circle-list">
                 {benchPlayers.map((player) => (
                   <div className="player-circle-item bench-player-station" key={player.id}>
-                    <PlayerCircle player={player} bench onClick={() => toggleCourt(player)} onPhotoClick={openStatsMenu} />
-                    {statsContextPlayer?.id === player.id && (
-                      <PlayerStatsContextMenu onSelect={openStatsGroup} />
+                    <PlayerCircle player={player} bench onClick={() => openBenchMenu(player)} onPhotoClick={openStatsMenu} />
+                    {benchContextPlayer?.id === player.id && (
+                      <PlayerStatsContextMenu bench onMoveToCourt={() => { setBenchContextPlayer(null); toggleCourt(player) }} />
                     )}
                     <div className="player-circle-actions">
                       <button
                         type="button"
-                        className="btn btn-sm btn-outline-primary py-0 px-2"
+                        className="btn btn-sm btn-success py-0 px-2"
                         onClick={() => toggleCourt(player)}
                         aria-label="Enviar a pista"
                         title="Enviar a pista"
                       >
                         <i
-                          className="fa-solid fa-arrow-up"
+                          className="fa-solid fa-arrow-left"
                           aria-hidden="true"
                         />{" "}
                       </button>
@@ -862,6 +985,7 @@ export default function MatchFollowUp() {
                               show: true,
                               player: selectedPlayer,
                               eventType,
+                              zone: null,
                             })
                           }
                           onSevenMeter={(selectedPlayer) =>
@@ -869,6 +993,7 @@ export default function MatchFollowUp() {
                               show: true,
                               player: selectedPlayer,
                               outcome: "goal",
+                              zone: null,
                             })
                           }
                         />
@@ -884,6 +1009,34 @@ export default function MatchFollowUp() {
           </table>
         </div>
       </div>}
+      <div className="card mb-3 w-100">
+        <div className="card-header d-flex justify-content-between align-items-center">
+          <strong><i className="fa-solid fa-hourglass-half me-2" aria-hidden="true" />Sancionados 2 minutos</strong>
+          <span className="text-muted small">{sanctionedPlayers.length} jugadores</span>
+        </div>
+        <div className="table-responsive">
+          <table className="table table-sm table-bordered align-middle mb-0">
+            <thead><tr><th>Jugador</th><th>Tiempo restante</th><th>Vuelve en marcador</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <tbody>
+              {sanctionedPlayers.map(item => (
+                <tr key={item.playerId}>
+                  <td>{item.playerName}</td>
+                  <td className="fw-bold">{formatSanctionTime(item.remaining)}</td>
+                  <td className="text-nowrap">{item.returnAt == null ? "-" : formatDuration(item.returnAt)} <button type="button" className="btn btn-sm btn-link p-0 text-secondary" onClick={() => editSanctionReturnTime(item)} aria-label="Editar hora de regreso" title="Editar hora de regreso"><i className="fa-solid fa-pen" aria-hidden="true" /></button></td>
+                  <td>{item.remaining === 0 ? "Finalizada" : item.running ? "En marcha" : "Pendiente"}</td>
+                  <td className="text-nowrap">
+                    <button type="button" className={`btn btn-sm ${item.running ? "btn-warning" : "btn-success"} me-1`} onClick={() => toggleSanctionTimer(item)} aria-label={item.running ? "Pausar sanción" : "Iniciar cuenta atrás"} title={item.running ? "Pausar sanción" : "Iniciar cuenta atrás"}><i className={`fa-solid ${item.running ? "fa-pause" : "fa-play"}`} aria-hidden="true" /></button>
+                    <button type="button" className="btn btn-sm btn-outline-primary me-1" onClick={() => editSanctionReturnTime(item)} aria-label="Marcar momento de sanción" title="Marcar momento de sanción"><i className="fa-solid fa-clock" aria-hidden="true" /></button>
+                    <button type="button" className="btn btn-sm btn-outline-secondary me-1" onClick={() => setSanctionedPlayers(current => current.map(entry => entry.playerId === item.playerId ? { ...entry, remaining: 120, running: false, returnAt: null } : entry))} aria-label="Reiniciar sanción" title="Reiniciar sanción"><i className="fa-solid fa-rotate-left" aria-hidden="true" /></button>
+                    <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => setSanctionedPlayers(current => current.filter(entry => entry.playerId !== item.playerId))} aria-label="Quitar sanción" title="Quitar sanción"><i className="fa-solid fa-trash" aria-hidden="true" /></button>
+                  </td>
+                </tr>
+              ))}
+              {!sanctionedPlayers.length && <tr><td colSpan="4" className="text-center text-muted py-3">No hay jugadores sancionados.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
       {statsModal.show && statsModalPlayer && (
         <>
           <div className="modal fade show d-block" tabIndex={-1} onClick={() => setStatsModal({ show: false, player: null, group: "attack" })}>
@@ -915,8 +1068,8 @@ export default function MatchFollowUp() {
                               field={field}
                               label={label}
                               onChange={changePlayerStat}
-                              onShot={(player, eventType) => setShotModal({ show: true, player, eventType })}
-                              onSevenMeter={(player) => setSevenMeterModal({ show: true, player, outcome: "goal" })}
+                              onShot={(player, eventType) => setShotModal({ show: true, player, eventType, zone: null })}
+                              onSevenMeter={(player) => setSevenMeterModal({ show: true, player, outcome: "goal", zone: null })}
                             />
                           )}
                         </div>
@@ -931,6 +1084,23 @@ export default function MatchFollowUp() {
         </>
       )}
       {showMatchStatsModal && <MatchStatsModal matchId={matchId} matchLabel={`${match.home_team_name} vs ${match.visitor_name}`} onClose={() => setShowMatchStatsModal(false)} />}
+      {historyModal.show && (
+        <>
+          <div className="modal fade show d-block" tabIndex={-1} onClick={() => setHistoryModal(current => ({ ...current, show: false }))}>
+            <div className="modal-dialog modal-lg modal-dialog-scrollable" onClick={event => event.stopPropagation()}>
+              <div className="modal-content">
+                <div className="modal-header"><h5 className="modal-title"><i className="fa-solid fa-clock-rotate-left me-2" aria-hidden="true" />Historial de acciones</h5><button type="button" className="btn-close" onClick={() => setHistoryModal(current => ({ ...current, show: false }))} aria-label="Cerrar" title="Cerrar" /></div>
+                <div className="modal-body">
+                  {historyModal.loading && <div className="text-center text-muted py-4">Cargando historial...</div>}
+                  {!historyModal.loading && !historyModal.events.length && <div className="alert alert-info mb-0">No hay acciones registradas.</div>}
+                  {!historyModal.loading && historyModal.events.length > 0 && <div className="table-responsive"><table className="table table-sm table-hover align-middle mb-0"><thead><tr><th>Jugador</th><th>Acción</th><th>Cuadrante</th><th>Minuto</th><th>Fecha</th><th></th></tr></thead><tbody>{historyModal.events.map(event => <tr key={event.id}><td>{event.player_name}</td><td>{historyActionLabels[event.action] || event.action}</td><td>{shotZones.find(([zone]) => zone === event.zone)?.[1] || event.zone || "-"}</td><td>{event.minute || "-"}</td><td>{new Date(event.created_at).toLocaleString("es-ES")}</td><td><button type="button" className="btn btn-sm btn-danger" onClick={() => deleteHistoryEvent(event)} aria-label={`Borrar ${historyActionLabels[event.action] || event.action}`} title="Borrar acción"><i className="fa-solid fa-trash" aria-hidden="true" /></button></td></tr>)}</tbody></table></div>}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="modal-backdrop fade show" />
+        </>
+      )}
       {shotModal.show && (
         <>
           <div
@@ -941,14 +1111,16 @@ export default function MatchFollowUp() {
             }
           >
             <div
-              className="modal-dialog modal-md"
+              className="modal-dialog modal-lg"
               onClick={(event) => event.stopPropagation()}
             >
               <div className="modal-content">
                 <div className="modal-header">
                   <h5 className="modal-title">
-                    {shotModal.eventType === "goal"
-                      ? "Zona del gol"
+                    {shotModal.eventType === "attack" || shotModal.eventType === "defense"
+                      ? shotModal.zone ? "Resultado del lanzamiento" : "Zona del lanzamiento"
+                      : shotModal.eventType === "goal"
+                        ? "Zona del gol"
                       : shotModal.eventType === "save"
                         ? "Zona de la parada"
                         : "Zona del gol recibido"}
@@ -960,7 +1132,8 @@ export default function MatchFollowUp() {
                       setShotModal({
                         show: false,
                         player: null,
-                        eventType: "goal",
+                        eventType: "attack",
+                        zone: null,
                       })
                     }
                     aria-label="Cerrar"
@@ -972,27 +1145,15 @@ export default function MatchFollowUp() {
                     {shotModal.player?.nombre}{" "}
                     {shotModal.player?.apellidos || ""}
                   </p>
-                  <button
-                    type="button"
-                    className="btn btn-outline-secondary mb-2"
-                    onClick={() => registerShot("outside")}
-                    aria-label="Tiro fuera de portería"
-                    title="Tiro fuera de portería"
-                  >
-                    <i
-                      className="fa-solid fa-arrow-up-right-from-square me-1"
-                      aria-hidden="true"
-                    />
-                    Fuera de portería
-                  </button>
+                  <button type="button" className="btn btn-outline-secondary mb-2" onClick={() => registerShot("outside", "outside")} aria-label="Tiro fuera de portería" title="Tiro fuera de portería"><i className="fa-solid fa-arrow-up-right-from-square me-1" aria-hidden="true" />Fuera de portería</button>
                   <div className="goal-frame">
                     <div className="goal-grid">
                       {shotZones.map(([zone, label]) => (
                         <button
                           type="button"
-                          className="goal-zone"
+                          className={`goal-zone ${shotModal.zone === zone ? "is-selected" : ""}`}
                           key={zone}
-                          onClick={() => registerShot(zone)}
+                          onClick={() => setShotModal((current) => ({ ...current, zone }))}
                           aria-label={label}
                           title={label}
                         >
@@ -1001,6 +1162,24 @@ export default function MatchFollowUp() {
                       ))}
                     </div>
                   </div>
+                  {shotModal.zone && (
+                    <div className="mt-3">
+                      <div className="small text-muted mb-2">Resultado en {shotZones.find(([zone]) => zone === shotModal.zone)?.[1]}</div>
+                      <div className="row justify-content-center g-2" role="group" aria-label="Resultado del lanzamiento">
+                        {shotModal.eventType === "defense" ? (
+                          <>
+                            <div className="col-6 col-lg-2"><button type="button" className="btn btn-success w-100" onClick={() => registerShot("save")} title="Registrar parada">Parada</button></div>
+                            <div className="col-6 col-lg-2"><button type="button" className="btn btn-danger w-100" onClick={() => registerShot("conceded")} title="Registrar gol recibido">Gol</button></div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="col-6 col-lg-2"><button type="button" className="btn btn-success w-100" onClick={() => registerShot("goal")} title="Registrar gol">Gol</button></div>
+                            <div className="col-6 col-lg-2"><button type="button" className="btn btn-danger w-100" onClick={() => registerShot("outside")} title="Registrar parada">Parada</button></div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -1010,29 +1189,34 @@ export default function MatchFollowUp() {
       )}
       {sevenMeterModal.show && (
         <>
-          <div className="modal fade show d-block" tabIndex={-1} onClick={() => setSevenMeterModal({ show: false, player: null, outcome: "goal" })}>
-            <div className="modal-dialog modal-md" onClick={(event) => event.stopPropagation()}>
+          <div className="modal fade show d-block" tabIndex={-1} onClick={() => setSevenMeterModal({ show: false, player: null, outcome: "goal", zone: null })}>
+            <div className="modal-dialog modal-lg" onClick={(event) => event.stopPropagation()}>
               <div className="modal-content">
                 <div className="modal-header">
                   <h5 className="modal-title">7 metros: cuadrante y resultado</h5>
-                  <button type="button" className="btn-close" onClick={() => setSevenMeterModal({ show: false, player: null, outcome: "goal" })} aria-label="Cerrar" title="Cerrar" />
+                  <button type="button" className="btn-close" onClick={() => setSevenMeterModal({ show: false, player: null, outcome: "goal", zone: null })} aria-label="Cerrar" title="Cerrar" />
                 </div>
                 <div className="modal-body text-center">
                   <p className="mb-3">{sevenMeterModal.player?.nombre} {sevenMeterModal.player?.apellidos || ""}</p>
-                  <div className="btn-group mb-3" role="group" aria-label="Resultado del lanzamiento de 7 metros">
-                    <button type="button" className={`btn ${sevenMeterModal.outcome === "goal" ? "btn-success" : "btn-outline-success"}`} onClick={() => setSevenMeterModal((current) => ({ ...current, outcome: "goal" }))} title="Gol de 7 metros">Gol</button>
-                    <button type="button" className={`btn ${sevenMeterModal.outcome === "save" ? "btn-warning" : "btn-outline-warning"}`} onClick={() => setSevenMeterModal((current) => ({ ...current, outcome: "save" }))} title="Parada del portero">Parada</button>
-                    <button type="button" className={`btn ${sevenMeterModal.outcome === "outside" ? "btn-secondary" : "btn-outline-secondary"}`} onClick={() => setSevenMeterModal((current) => ({ ...current, outcome: "outside" }))} title="Lanzamiento fuera">Fuera</button>
-                  </div>
                   <div className="goal-frame">
                     <div className="goal-grid">
                       {shotZones.map(([zone, label]) => (
-                        <button type="button" className="goal-zone" key={zone} onClick={() => registerSevenMeter(zone)} aria-label={`${label}, ${sevenMeterModal.outcome}`} title={`Registrar ${sevenMeterModal.outcome}: ${label}`}>
+                        <button type="button" className={`goal-zone ${sevenMeterModal.zone === zone ? "is-selected" : ""}`} key={zone} onClick={() => setSevenMeterModal((current) => ({ ...current, zone }))} aria-label={label} title={label}>
                           {label}
                         </button>
                       ))}
                     </div>
                   </div>
+                  {sevenMeterModal.zone && (
+                    <div className="mt-3">
+                      <div className="small text-muted mb-2">Resultado en {shotZones.find(([zone]) => zone === sevenMeterModal.zone)?.[1]}</div>
+                      <div className="row justify-content-center g-2" role="group" aria-label="Resultado del lanzamiento de 7 metros">
+                        <div className="col-6 col-lg-2"><button type="button" className="btn btn-success w-100" onClick={() => registerSevenMeter("goal")} title="Gol de 7 metros">Gol</button></div>
+                        <div className="col-6 col-lg-2"><button type="button" className="btn btn-danger w-100" onClick={() => registerSevenMeter("save")} title="Parada del portero">Parada</button></div>
+                        <div className="col-6 col-lg-2"><button type="button" className="btn btn-secondary w-100" onClick={() => registerSevenMeter("outside")} title="Lanzamiento fuera">Fuera</button></div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

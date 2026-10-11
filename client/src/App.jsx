@@ -10,6 +10,7 @@ import PlayersManage from './pages/PlayersManage'
 import MatchSchedule from './pages/MatchSchedule'
 import MatchStatistics from './pages/MatchStatistics'
 import MatchFollowUp from './pages/MatchFollowUp'
+import TeamStatistics from './pages/TeamStatistics'
 
 export default function App() {
   const [roles, setRoles] = useState([])
@@ -41,6 +42,7 @@ export default function App() {
           <Route path="/" element={<Home user={user} onLogout={handleLogout} />} />
           <Route path="/administrar/usuarios" element={<AdminUsers />} />
           <Route path="/equipos/gestionar" element={<TeamsManage />} />
+          <Route path="/equipos/estadisticas" element={<TeamStatistics />} />
           <Route path="/jugadores/gestionar" element={<PlayersManage />} />
           <Route path="/partido/programar" element={<MatchSchedule />} />
           <Route path="/partido/estadisticas" element={<MatchStatistics />} />

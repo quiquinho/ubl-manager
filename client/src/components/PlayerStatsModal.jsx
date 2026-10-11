@@ -1,12 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
+import { addMissingAttackZones } from '../utils/statistics'
 
 const statColumns = [
-  ['goals', 'Goles'], ['shots', 'Lanzamientos'], ['assists', 'Asistencias'], ['turnovers', 'Pérdidas'],
-  ['steals', 'Robos'], ['saves', 'Paradas'], ['goals_conceded', 'Goles recibidos'], ['blocks', 'Bloqueos'],
-  ['exclusions_2min', 'Exclusiones'], ['yellow_cards', 'Amarillas'], ['red_cards', 'Rojas'], ['blue_cards', 'Azules'],
-  ['seven_meters_scored', '7 m marcados'], ['seven_meters_attempted', '7 m lanzados'], ['seven_meters_received', '7 m recibidos'],
-  ['seven_meters_saved', '7 m parados'], ['fouls', 'Faltas']
+  ['goal_ratio', 'Goles/Lanz.'], ['goal_effectiveness', '% efectividad'], ['turnovers', 'Pérdidas'],
+  ['goalkeeper_ratio', 'Paradas/Lanz.'], ['goalkeeper_effectiveness', '% efectividad'], ['blocks', 'Bloqueos'], ['steals', 'Recuperaciones'],
+  ['exclusions_2min', 'Exclusiones'], ['fouls', 'Faltas'],
+  ['seven_meters_for', '7m A favor'], ['seven_meters_against', '7m En contra']
+]
+const statGroups = [
+  ['Ataque', [['goal_ratio', 'Goles/Lanz.'], ['goal_effectiveness', '% efectividad'], ['turnovers', 'Pérdidas']]],
+  ['Defensa', [['goalkeeper_ratio', 'Paradas/Lanz.'], ['goalkeeper_effectiveness', '% efectividad'], ['blocks', 'Bloqueos'], ['steals', 'Recuperaciones']]],
+  ['Sanciones', [['exclusions_2min', 'Exclusiones'], ['fouls', 'Faltas']]],
+  ['7 metros', [['seven_meters_for', '7m A favor'], ['seven_meters_against', '7m En contra']]]
 ]
 
 const zones = [
@@ -26,6 +32,18 @@ function formatDuration(value) {
 
 function playerName(player) {
   return `${player.nombre} ${player.apellidos || ''}`.trim()
+}
+
+function statValue(player, field) {
+  const shots = Number(player.shots || 0)
+  if (field === 'goal_ratio') return `${Number(player.goals || 0)}/${shots}`
+  if (field === 'goal_effectiveness') return `${shots ? Math.round(Number(player.goals || 0) / shots * 100) : 0}%`
+  const goalkeeperLaunches = Number(player.saves || 0) + Number(player.goals_conceded || 0)
+  if (field === 'goalkeeper_ratio') return `${Number(player.saves || 0)}/${goalkeeperLaunches}`
+  if (field === 'goalkeeper_effectiveness') return `${goalkeeperLaunches ? Math.round(Number(player.saves || 0) / goalkeeperLaunches * 100) : 0}%`
+  if (field === 'seven_meters_for') return `${Number(player.seven_meters_scored || 0)}/${Number(player.seven_meters_attempted || 0)}`
+  if (field === 'seven_meters_against') return `${Number(player.seven_meters_saved || 0)}/${Number(player.seven_meters_received || 0)}`
+  return Number(player[field] || 0)
 }
 
 function averageDuration(player) {
@@ -57,7 +75,7 @@ export default function PlayerStatsModal({ player, teams, onClose }) {
     setData(null)
     setError('')
     axios.get(`/api/players/${player.id}/statistics?${params.toString()}`)
-      .then(response => setData({ ...response.data.player, events: response.data.events || [] }))
+      .then(response => setData({ ...response.data.player, events: addMissingAttackZones(response.data.events || [], response.data.player.shots) }))
       .catch(response => setError(response.response?.data?.error || 'No se pudieron cargar las estadísticas acumuladas.'))
   }, [filters, player.id])
 
@@ -68,7 +86,7 @@ export default function PlayerStatsModal({ player, teams, onClose }) {
 
   return <>
     <div className="modal fade show d-block" tabIndex={-1} onClick={onClose}>
-      <div className="modal-dialog modal-xl modal-dialog-scrollable" onClick={event => event.stopPropagation()}>
+      <div className="modal-dialog modal-xxl modal-dialog-scrollable" onClick={event => event.stopPropagation()}>
         <div className="modal-content">
           <div className="modal-header">
             <div><h5 className="modal-title">Estadísticas acumuladas</h5><div className="small text-muted">{playerName(player)}</div></div>
@@ -89,6 +107,7 @@ export default function PlayerStatsModal({ player, teams, onClose }) {
                 <div className="col-sm-4"><div className="card h-100"><div className="card-body"><small className="text-muted">Tiempo medio por partido</small><div className="display-6 fw-bold">{averageDuration(data)}</div></div></div></div>
                 <div className="col-sm-4"><div className="card h-100"><div className="card-body"><small className="text-muted">Posición</small><div className="fs-4 fw-bold">{data.posicion || '-'}</div></div></div></div>
               </div>
+              <div className="table-responsive mb-3"><table className="table table-sm table-bordered align-middle mb-0 statistics-table"><thead><tr><th>Grupo</th><th>Estadísticas</th></tr></thead><tbody>{statGroups.map(([group, columns]) => <tr key={group}><th className="text-nowrap">{group}</th><td>{columns.map(([field, label]) => <span className="d-inline-block me-4 mb-1 text-nowrap" key={field}><strong>{label}:</strong> {statValue(data, field)}</span>)}</td></tr>)}</tbody></table></div>
               <div className="card mb-3">
                 <div className="card-header"><strong>{isGoalkeeper(data) ? 'Lanzamientos recibidos en portería' : 'Lanzamientos y goles marcados'}</strong></div>
                 <div className="card-body">
@@ -111,7 +130,6 @@ export default function PlayerStatsModal({ player, teams, onClose }) {
                   </div>
                 </div>
               </div>
-              <div className="table-responsive"><table className="table table-sm table-bordered align-middle mb-0 statistics-table"><thead><tr>{statColumns.map(([, label]) => <th key={label}>{label}</th>)}</tr></thead><tbody><tr>{statColumns.map(([field]) => <td key={field}>{data[field] || 0}</td>)}</tr></tbody></table></div>
             </>}
           </div>
         </div>

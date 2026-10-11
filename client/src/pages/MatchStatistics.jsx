@@ -1,12 +1,24 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
+import { addMissingAttackZones } from '../utils/statistics'
 
 const statColumns = [
-  ['goals', 'Goles'], ['shots', 'Lanzamientos'], ['assists', 'Asistencias'], ['saves', 'Paradas'],
-  ['goals_conceded', 'Goles recibidos'], ['steals', 'Robos'], ['turnovers', 'Pérdidas'], ['blocks', 'Bloqueos'],
-  ['exclusions_2min', 'Exclusiones'], ['yellow_cards', 'Amarillas'], ['red_cards', 'Rojas'],
-  ['seven_meters_scored', '7 m marcados'], ['seven_meters_attempted', '7 m lanzados'], ['fouls', 'Faltas']
+  ['goal_ratio', 'Goles/Lanz.'], ['goal_effectiveness', '% efectividad'],
+  ['goalkeeper_ratio', 'Paradas/Lanz.'], ['goalkeeper_effectiveness', '% efectividad'], ['turnovers', 'Pérdidas'], ['blocks', 'Bloqueos'], ['steals', 'Recuperaciones'],
+  ['exclusions_2min', 'Exclusiones'], ['fouls', 'Faltas'], ['seven_meters_for', 'A favor'], ['seven_meters_against', 'En contra']
 ]
+
+function statValue(player, field) {
+  const shots = Number(player.shots || 0)
+  if (field === 'goal_ratio') return `${Number(player.goals || 0)}/${shots}`
+  if (field === 'goal_effectiveness') return `${shots ? Math.round(Number(player.goals || 0) / shots * 100) : 0}%`
+  const goalkeeperLaunches = Number(player.saves || 0) + Number(player.goals_conceded || 0)
+  if (field === 'goalkeeper_ratio') return `${Number(player.saves || 0)}/${goalkeeperLaunches}`
+  if (field === 'goalkeeper_effectiveness') return `${goalkeeperLaunches ? Math.round(Number(player.saves || 0) / goalkeeperLaunches * 100) : 0}%`
+  if (field === 'seven_meters_for') return `${Number(player.seven_meters_scored || 0)}/${Number(player.seven_meters_attempted || 0)}`
+  if (field === 'seven_meters_against') return `${Number(player.seven_meters_saved || 0)}/${Number(player.seven_meters_received || 0)}`
+  return Number(player[field] || 0)
+}
 
 const actionLabels = {
   goal: 'Gol', save: 'Parada', conceded: 'Gol recibido', outside: 'Fuera',
@@ -52,7 +64,7 @@ export default function MatchStatistics() {
     if (!selectedMatchId) return
     setData(null)
     axios.get(`/api/matches/${selectedMatchId}/statistics`).then(response => {
-      setData(response.data)
+      setData({ ...response.data, events: addMissingAttackZones(response.data.events || [], response.data.summary.shots) })
       setError('')
     }).catch(errorResponse => setError(errorResponse.response?.data?.error || 'No se pudieron cargar las estadísticas.'))
   }, [selectedMatchId])
@@ -105,7 +117,7 @@ export default function MatchStatistics() {
       </div><div className="row g-2 mt-1"><div className="col-lg-3"><label className="form-label">Zona</label><select className="form-select" name="zone" value={filters.zone} onChange={updateFilter}><option value="">Todas</option>{[...new Set(data?.events.map(event => event.zone).filter(Boolean) || [])].map(zone => <option key={zone} value={zone}>{zone}</option>)}</select></div></div></div></div>
       {data && <>
         <div className="row g-3 mb-3"><div className="col-md-3"><div className="card h-100"><div className="card-body"><small className="text-muted">Marcador</small><div className="display-6 fw-bold">{data.summary.home_score} - {data.summary.visitor_score}</div><small>{data.match.home_team_name} · {data.match.visitor_name}</small></div></div></div><div className="col-md-3"><div className="card h-100"><div className="card-body"><small className="text-muted">Goles y lanzamientos</small><div className="display-6 fw-bold">{data.summary.goals}</div><small>{data.summary.shots} lanzamientos</small></div></div></div><div className="col-md-3"><div className="card h-100"><div className="card-body"><small className="text-muted">7 metros</small><div className="display-6 fw-bold">{data.summary.seven_meters}</div><small>lanzamientos</small></div></div></div><div className="col-md-3"><div className="card h-100"><div className="card-body"><small className="text-muted">Tiempo acumulado</small><div className="display-6 fw-bold">{formatDuration(data.summary.time_on_court_seconds)}</div><small>{data.players.length} jugadores</small></div></div></div></div>
-        <div className="card mb-3"><div className="card-header d-flex justify-content-between"><strong>Rendimiento por jugador</strong><span className="text-muted small">{filteredPlayers.length} jugadores</span></div><div className="table-responsive"><table className="table table-sm table-bordered align-middle mb-0"><thead><tr><th>Jugador</th><th>Posición</th><th>Situación</th><th>Tiempo</th>{statColumns.map(([, label]) => <th key={label}>{label}</th>)}</tr></thead><tbody>{filteredPlayers.map(player => <tr key={player.id}><td className="text-nowrap">{player.numero ? `#${player.numero} ` : ''}{playerName(player)}</td><td>{player.posicion || 'Sin posición'}</td><td>{player.on_court ? 'Pista' : 'Banquillo'}</td><td>{formatDuration(player.time_on_court_seconds)}</td>{statColumns.map(([field]) => <td key={field}>{player[field] || 0}</td>)}</tr>)}</tbody></table></div></div>
+        <div className="card mb-3"><div className="card-header d-flex justify-content-between"><strong>Rendimiento por jugador</strong><span className="text-muted small">{filteredPlayers.length} jugadores</span></div><div className="table-responsive"><table className="table table-sm table-bordered align-middle mb-0"><thead><tr><th>Jugador</th><th>Posición</th><th>Situación</th><th>Tiempo</th>{statColumns.map(([, label]) => <th key={label}>{label}</th>)}</tr></thead><tbody>{filteredPlayers.map(player => <tr key={player.id}><td className="text-nowrap">{player.numero ? `#${player.numero} ` : ''}{playerName(player)}</td><td>{player.posicion || 'Sin posición'}</td><td>{player.on_court ? 'Pista' : 'Banquillo'}</td><td>{formatDuration(player.time_on_court_seconds)}</td>{statColumns.map(([field]) => <td key={field}>{statValue(player, field)}</td>)}</tr>)}</tbody></table></div></div>
         <div className="row g-3 mb-3"><div className="col-xl-6"><div className="card h-100"><div className="card-header d-flex justify-content-between"><strong>Portería ajena</strong><span className="text-muted small">Tiros y goles</span></div><div className="card-body"><div className="goal-frame statistics-goal-frame"><div className="goal-grid statistics-goal-grid">{zoneStats.attack.map(({ zone, shots, positive, ratio }) => <div className={`statistics-goal-zone ${shots === 0 ? 'zone-neutral' : ratio > 0 ? 'zone-positive' : 'zone-negative'}`} key={zone}><strong>{zoneLabels[zone]}</strong><span><i className="fa-solid fa-bullseye" aria-hidden="true" /> {shots} tiros</span><span><i className="fa-solid fa-check" aria-hidden="true" /> {positive} goles</span><b>{Math.round(ratio * 100)}%</b></div>)}</div></div></div></div></div><div className="col-xl-6"><div className="card h-100"><div className="card-header d-flex justify-content-between"><strong>Portería propia</strong><span className="text-muted small">Paradas y goles recibidos</span></div><div className="card-body"><div className="goal-frame statistics-goal-frame"><div className="goal-grid statistics-goal-grid">{zoneStats.own.map(({ zone, shots, positive, ratio }) => <div className={`statistics-goal-zone ${shots === 0 ? 'zone-neutral' : ratio > 0 ? 'zone-positive' : 'zone-negative'}`} key={zone}><strong>{zoneLabels[zone]}</strong><span><i className="fa-solid fa-bullseye" aria-hidden="true" /> {shots} tiros</span><span><i className="fa-solid fa-shield-halved" aria-hidden="true" /> {positive} paradas</span><b>{Math.round(ratio * 100)}%</b></div>)}</div></div></div></div></div><div className="col-12"><div className="small text-muted text-center"><i className="fa-solid fa-circle-info me-1" aria-hidden="true" />Portería ajena: verde es gol. Portería propia: verde es parada y rojo es gol recibido. Gris: sin acciones.</div></div></div>
         <div className="card"><div className="card-header d-flex justify-content-between"><strong>Acciones registradas</strong><span className="text-muted small">{filteredEvents.length} resultados</span></div><div className="table-responsive"><table className="table table-sm table-hover align-middle mb-0"><thead><tr><th>Jugador</th><th>Acción</th><th>Zona</th><th>Minuto</th><th>Fecha</th></tr></thead><tbody>{filteredEvents.map(event => <tr key={`${event.action}-${event.id}`}><td>{event.player_name}</td><td>{actionLabels[event.action] || event.action}</td><td>{zoneLabels[event.zone] || event.zone || 'Sin zona'}</td><td>{event.minute || '-'}</td><td>{new Date(event.created_at).toLocaleString('es-ES')}</td></tr>)}{!filteredEvents.length && <tr><td colSpan="5" className="text-center text-muted py-3">No hay acciones para los filtros seleccionados.</td></tr>}</tbody></table></div></div>
       </>}

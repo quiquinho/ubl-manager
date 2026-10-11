@@ -1,6 +1,15 @@
 import React, { useEffect, useState } from 'react'
 import axios from 'axios'
 
+const menuIcons = {
+  Administrar: 'fa-user-shield', Usuarios: 'fa-users-gear', Equipos: 'fa-users', Jugadores: 'fa-user',
+  Partido: 'fa-futbol', Gestionar: 'fa-gear', Estadisticas: 'fa-chart-column', Programar: 'fa-calendar-days', Seguimiento: 'fa-stopwatch',
+}
+
+function MenuIcon({ item }) {
+  return <i className={`fa-solid ${menuIcons[item.title] || 'fa-folder'} me-1`} aria-hidden="true" />
+}
+
 export default function TopMenu({ roleId }) {
   const [menu, setMenu] = useState([])
 
@@ -33,10 +42,10 @@ export default function TopMenu({ roleId }) {
               if (children.length > 0) {
                 return (
                   <li className="nav-item dropdown" key={item.id}>
-                    <a className="nav-link dropdown-toggle" href={item.path || '#'} id={`menu-${item.id}`} role="button" data-bs-toggle="dropdown" aria-expanded="false">{item.title}</a>
+                    <a className="nav-link dropdown-toggle" href={item.path || '#'} id={`menu-${item.id}`} role="button" data-bs-toggle="dropdown" aria-expanded="false"><MenuIcon item={item} />{item.title}</a>
                     <ul className="dropdown-menu" aria-labelledby={`menu-${item.id}`}>
                       {children.map(ch => (
-                        <li key={ch.id}><a className="dropdown-item" href={ch.path}>{ch.title}</a></li>
+                        <li key={ch.id}><a className="dropdown-item" href={ch.path}><MenuIcon item={ch} />{ch.title}</a></li>
                       ))}
                     </ul>
                   </li>
@@ -44,7 +53,7 @@ export default function TopMenu({ roleId }) {
               }
               return (
                 <li className="nav-item" key={item.id}>
-                  <a className="nav-link" href={item.path}>{item.title}</a>
+                  <a className="nav-link" href={item.path}><MenuIcon item={item} />{item.title}</a>
                 </li>
               )
             })}

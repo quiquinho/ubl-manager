@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
+import { addMissingAttackZones } from '../utils/statistics'
 
 const statColumns = [
-  ['goals', 'Goles'], ['shots', 'Lanzamientos'], ['assists', 'Asistencias'], ['turnovers', 'Perdidas'],
-  ['steals', 'Robos'], ['saves', 'Paradas'], ['goals_conceded', 'Goles recibidos'], ['blocks', 'Bloqueos'],
-  ['exclusions_2min', 'Exclusiones'], ['yellow_cards', 'Amarillas'], ['red_cards', 'Rojas'], ['blue_cards', 'Azules'],
-  ['seven_meters_scored', '7 m marcados'], ['seven_meters_attempted', '7 m lanzados'], ['seven_meters_received', '7 m recibidos'],
-  ['seven_meters_saved', '7 m parados'], ['fouls', 'Faltas']
+  ['goal_ratio', 'Goles/Lanz.'], ['goal_effectiveness', '% efectividad'], ['turnovers', 'Perdidas'],
+  ['goalkeeper_ratio', 'Paradas/Lanz.'], ['goalkeeper_effectiveness', '% efectividad'], ['blocks', 'Bloqueos'], ['steals', 'Recuperaciones'],
+  ['exclusions_2min', 'Exclusiones'], ['fouls', 'Faltas'],
+  ['seven_meters_for', 'A favor'], ['seven_meters_against', 'En contra']
 ]
 
 const zoneLabels = {
@@ -18,6 +18,27 @@ const zoneLabels = {
 const zones = Object.keys(zoneLabels)
 const playerName = player => `${player.nombre} ${player.apellidos || ''}`.trim()
 const formatDuration = value => `${String(Math.floor(Number(value || 0) / 60)).padStart(2, '0')}:${String(Number(value || 0) % 60).padStart(2, '0')}`
+function statValue(player, field) {
+  const shots = Number(player.shots || 0)
+  if (field === 'goal_ratio') return `${Number(player.goals || 0)}/${shots}`
+  if (field === 'goal_effectiveness') return `${shots ? Math.round(Number(player.goals || 0) / shots * 100) : 0}%`
+  const goalkeeperLaunches = Number(player.saves || 0) + Number(player.goals_conceded || 0)
+  if (field === 'goalkeeper_ratio') return `${Number(player.saves || 0)}/${goalkeeperLaunches}`
+  if (field === 'goalkeeper_effectiveness') return `${goalkeeperLaunches ? Math.round(Number(player.saves || 0) / goalkeeperLaunches * 100) : 0}%`
+  if (field === 'seven_meters_for') return `${Number(player.seven_meters_scored || 0)}/${Number(player.seven_meters_attempted || 0)}`
+  if (field === 'seven_meters_against') return `${Number(player.seven_meters_saved || 0)}/${Number(player.seven_meters_received || 0)}`
+  return Number(player[field] || 0)
+}
+
+function statSortValue(player, field) {
+  const shots = Number(player.shots || 0)
+  if (field === 'goal_ratio' || field === 'goal_effectiveness') return shots ? Number(player.goals || 0) / shots : 0
+  const goalkeeperLaunches = Number(player.saves || 0) + Number(player.goals_conceded || 0)
+  if (field === 'goalkeeper_ratio' || field === 'goalkeeper_effectiveness') return goalkeeperLaunches ? Number(player.saves || 0) / goalkeeperLaunches : 0
+  if (field === 'seven_meters_for') return Number(player.seven_meters_scored || 0) / Number(player.seven_meters_attempted || 1)
+  if (field === 'seven_meters_against') return Number(player.seven_meters_saved || 0) / Number(player.seven_meters_received || 1)
+  return Number(player[field] || 0)
+}
 
 function ZoneSummary({ events, title, positiveActions, icon }) {
   return (
@@ -50,17 +71,23 @@ export default function MatchStatsModal({ matchId, matchLabel, onClose }) {
   const [tableFilter, setTableFilter] = useState('')
   const [sort, setSort] = useState({ field: 'nombre', direction: 'asc' })
 
+  function prepareStatsData(statsData, players = statsData.players) {
+    const targetShots = players.reduce((total, player) => total + Number(player.shots || 0), 0)
+    return { ...statsData, events: addMissingAttackZones(statsData.events || [], targetShots), players }
+  }
+
   useEffect(() => {
     axios.get(`/api/matches/${matchId}/statistics?_=${Date.now()}`, { headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' } })
       .then(async response => {
         const statsData = response.data
         if (statsData.players.some(player => player.photo_data || player.photo_url)) {
-          setData(statsData)
+          setData(prepareStatsData(statsData))
           return
         }
         const followUpResponse = await axios.get(`/api/matches/${matchId}/follow-up?_=${Date.now()}`, { headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' } })
         const photosByPlayer = new Map(followUpResponse.data.players.map(player => [player.id, { photo_data: player.photo_data, photo_url: player.photo_url }]))
-        setData({ ...statsData, players: statsData.players.map(player => ({ ...player, ...(photosByPlayer.get(player.id) || {}) })) })
+        const players = statsData.players.map(player => ({ ...player, ...(photosByPlayer.get(player.id) || {}) }))
+        setData(prepareStatsData(statsData, players))
       })
       .catch(response => setError(response.response?.data?.error || 'No se pudieron cargar las estadisticas del partido.'))
   }, [matchId])
@@ -71,15 +98,19 @@ export default function MatchStatsModal({ matchId, matchLabel, onClose }) {
     return data.players
       .filter(player => !query || playerName(player).toLocaleLowerCase('es').includes(query) || String(player.numero || '').includes(query))
       .sort((left, right) => {
-        const leftValue = sort.field === 'nombre' ? playerName(left) : Number(left[sort.field] || 0)
-        const rightValue = sort.field === 'nombre' ? playerName(right) : Number(right[sort.field] || 0)
+        const leftValue = sort.field === 'nombre' ? playerName(left) : statSortValue(left, sort.field)
+        const rightValue = sort.field === 'nombre' ? playerName(right) : statSortValue(right, sort.field)
         const comparison = typeof leftValue === 'string' ? leftValue.localeCompare(rightValue, 'es') : leftValue - rightValue
         return sort.direction === 'asc' ? comparison : -comparison
       })
   }, [data, tableFilter, sort])
 
   const teamTotals = useMemo(() => {
-    return statColumns.map(([field, label]) => [field, label, filteredPlayers.reduce((total, player) => total + Number(player[field] || 0), 0)])
+    const totals = filteredPlayers.reduce((result, player) => {
+      Object.keys(player).forEach(field => { if (typeof player[field] === 'number') result[field] = (result[field] || 0) + player[field] })
+      return result
+    }, {})
+    return statColumns.map(([field, label]) => [field, label, statValue(totals, field)])
   }, [filteredPlayers])
   const filteredTime = filteredPlayers.reduce((total, player) => total + Number(player.time_on_court_seconds || 0), 0)
 
@@ -96,7 +127,7 @@ export default function MatchStatsModal({ matchId, matchLabel, onClose }) {
   function exportCsv() {
     if (!data) return
     const headers = ['Jugador', 'Tiempo', ...statColumns.map(([, label]) => label)]
-    const rows = filteredPlayers.map(player => [playerName(player), formatDuration(player.time_on_court_seconds), ...statColumns.map(([field]) => player[field] || 0)])
+    const rows = filteredPlayers.map(player => [playerName(player), formatDuration(player.time_on_court_seconds), ...statColumns.map(([field]) => statValue(player, field))])
     const csv = [headers, ...rows].map(row => row.map(value => `"${String(value).replaceAll('"', '""')}"`).join(';')).join('\r\n')
     const blob = new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
@@ -118,7 +149,7 @@ export default function MatchStatsModal({ matchId, matchLabel, onClose }) {
       const tone = !zoneEvents.length ? '#e9ecef' : positive ? '#d1e7dd' : '#f8d7da'
       return `<td style="background:${tone};border:1px solid #777;padding:12px;text-align:center"><strong>${escapeHtml(zoneLabels[zone])}</strong><br>${zoneEvents.length} acciones<br>${positive} positivas</td>`
     }).reduce((rows, cell, index) => { const row = Math.floor(index / 3); rows[row] = `${rows[row] || ''}${cell}`; return rows }, []).map(row => `<tr>${row}</tr>`).join('')
-    const playerRows = filteredPlayers.map(player => `<tr><td>${escapeHtml(playerName(player))}</td><td>${formatDuration(player.time_on_court_seconds)}</td>${statColumns.map(([field]) => `<td>${player[field] || 0}</td>`).join('')}</tr>`).join('')
+    const playerRows = filteredPlayers.map(player => `<tr><td>${escapeHtml(playerName(player))}</td><td>${formatDuration(player.time_on_court_seconds)}</td>${statColumns.map(([field]) => `<td>${statValue(player, field)}</td>`).join('')}</tr>`).join('')
     const headers = statColumns.map(([, label]) => `<th>${escapeHtml(label)}</th>`).join('')
     const html = `<html><head><meta charset="utf-8"><style>body{font-family:Arial;color:#222}table{border-collapse:collapse;margin:12px 0}th,td{border:1px solid #aaa;padding:6px}th{background:#d9eaf7}.chart td{width:150px;height:70px}</style></head><body>
       <h1>Estadisticas ${escapeHtml(matchLabel)}</h1><h2>Resumen</h2><p>Marcador: ${data.summary.home_score} - ${data.summary.visitor_score}</p>
@@ -167,7 +198,7 @@ export default function MatchStatsModal({ matchId, matchLabel, onClose }) {
                 <div className="table-responsive"><table className="table table-sm table-bordered align-middle mb-0 statistics-table"><thead><tr><th>Foto</th><th>Jugador</th><th>Tiempo</th>{statColumns.map(([, label]) => <th key={label}>{label}</th>)}</tr></thead><tbody>
                   <tr className="table-light"><th>Acumulado</th><th>-</th><th>{formatDuration(filteredTime)}</th>{teamTotals.map(([field, label, value]) => <th key={field}>{value}</th>)}</tr>
                   <tr className="statistics-sort-row"><th></th><th><button type="button" className="btn btn-link p-0 text-dark" onClick={() => changeSort('nombre')}>Jugador{sortIndicator('nombre')}</button></th><th><button type="button" className="btn btn-link p-0 text-dark" onClick={() => changeSort('time_on_court_seconds')}>Tiempo{sortIndicator('time_on_court_seconds')}</button></th>{statColumns.map(([field, label]) => <th key={field}><button type="button" className="btn btn-link p-0 text-dark" onClick={() => changeSort(field)}>{label}{sortIndicator(field)}</button></th>)}</tr>
-                  {filteredPlayers.map(player => <tr key={player.id}><td><span className="match-stats-player-photo">{player.photo_data || player.photo_url ? <img src={player.photo_data || player.photo_url} alt={playerName(player)} /> : <i className="fa-solid fa-user" aria-hidden="true" />}</span></td><td className="text-nowrap">{player.numero ? `#${player.numero} ` : ''}{playerName(player)}</td><td>{formatDuration(player.time_on_court_seconds)}</td>{statColumns.map(([field]) => <td key={field}>{player[field] || 0}</td>)}</tr>)}
+                  {filteredPlayers.map(player => <tr key={player.id}><td><span className="match-stats-player-photo">{player.photo_data || player.photo_url ? <img src={player.photo_data || player.photo_url} alt={playerName(player)} /> : <i className="fa-solid fa-user" aria-hidden="true" />}</span></td><td className="text-nowrap">{player.numero ? `#${player.numero} ` : ''}{playerName(player)}</td><td>{formatDuration(player.time_on_court_seconds)}</td>{statColumns.map(([field]) => <td key={field}>{statValue(player, field)}</td>)}</tr>)}
                 </tbody></table></div>
               </div>
               <div className="row g-3"><ZoneSummary events={attackEvents} title="Goles marcados por cuadrante" positiveActions={['goal', 'seven_meter_goal']} icon="fa-check" /><ZoneSummary events={defenseEvents} title="Goles recibidos y paradas por cuadrante" positiveActions={['save', 'seven_meter_save']} icon="fa-shield-halved" /></div>

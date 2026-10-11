@@ -10,6 +10,8 @@ body { font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvet
 
 select { padding: 6px; }
 
+.modal-xxl { max-width: 95vw; }
+
 /* Small adjustments for login */
 input { padding: 8px; }
 button { padding: 8px 12px; cursor: pointer }
@@ -19,18 +21,18 @@ button { padding: 8px 12px; cursor: pointer }
 
 .goal-frame { max-width: 420px; margin: 0 auto; padding: 10px; border: 8px solid #adb5bd; border-bottom-width: 12px; background: #f8f9fa; }
 .goal-grid { display: grid; grid-template-columns: repeat(3, 1fr); aspect-ratio: 3 / 2; border: 3px solid #dc3545; background: #fff; }
-.goal-zone { border: 1px solid #dc3545; border-radius: 0; padding: 8px 4px; background: rgba(220, 53, 69, 0.06); color: #842029; font-size: 0.72rem; }
-.goal-zone:hover { background: rgba(220, 53, 69, 0.2); }
+.goal-zone { border: 1px solid #adb5bd; border-radius: 0; padding: 8px 4px; background: #e9ecef; color: #495057; font-size: 0.72rem; }
+.goal-zone:hover, .goal-zone.is-selected { background: #0d6efd; border-color: #0a58ca; color: #fff; }
 
-.statistics-goal-frame { max-width: 720px; border-color: #495057; }
+.statistics-goal-frame { max-width: 360px; padding: 5px; border-width: 4px; border-color: #495057; }
 .statistics-goal-grid { border-color: #495057; background: linear-gradient(135deg, rgba(13, 110, 253, 0.08), rgba(25, 135, 84, 0.08)); }
-.statistics-goal-zone { min-height: 108px; padding: 10px; border: 1px solid rgba(73, 80, 87, 0.35); display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 4px; text-align: center; background: rgba(255, 255, 255, 0.82); }
-.statistics-goal-zone strong { font-size: 0.8rem; }
-.statistics-goal-zone span { font-size: 0.85rem; }
+.statistics-goal-zone { min-height: 54px; padding: 5px; border: 1px solid rgba(73, 80, 87, 0.35); display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 2px; text-align: center; background: rgba(255, 255, 255, 0.82); }
+.statistics-goal-zone strong { font-size: 0.7rem; }
+.statistics-goal-zone span { font-size: 0.7rem; }
 .statistics-goal-zone.zone-neutral { background: #e9ecef; color: #6c757d; }
 .statistics-goal-zone.zone-positive { background: #d1e7dd; color: #0f5132; border-color: #75b798; }
 .statistics-goal-zone.zone-negative { background: #f8d7da; color: #842029; border-color: #ea868f; }
-.statistics-goal-zone b { font-size: 1rem; }
+.statistics-goal-zone b { font-size: 0.85rem; }
 .player-circle-list { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start; }
 .player-circle-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0.35rem; min-width: 88px; }
 .player-circle { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0.15rem; border: 0; background: transparent; padding: 0; color: inherit; }
@@ -43,13 +45,11 @@ button { padding: 8px 12px; cursor: pointer }
 .player-circle-number { position: absolute; right: -5px; bottom: -4px; min-width: 24px; height: 24px; padding: 2px 5px; border-radius: 50%; background: #212529; color: #fff; font-size: 0.75rem; line-height: 20px; font-weight: 700; }
 .player-circle-label { width: 84px; min-height: 1.8em; font-size: 0.78rem; line-height: 1.1; text-align: center; overflow-wrap: anywhere; }
 .player-circle-actions .btn { font-size: 0.75rem; }
-.player-stats-context-menu { position: absolute; z-index: 5; top: -20px; left: 50%; width: 132px; height: 132px; transform: translateX(-50%); pointer-events: none; }
-.player-stats-context-menu::before { content: ""; position: absolute; inset: 17px; border: 1px solid rgba(52, 64, 84, 0.25); border-radius: 50%; background: rgba(255, 255, 255, 0.88); box-shadow: 0 8px 24px rgba(16, 24, 40, 0.18); }
-.player-stats-context-menu button { position: absolute; z-index: 1; width: 70px; height: 34px; border: 1px solid #d0d5dd; border-radius: 999px; padding: 0.25rem 0.35rem; color: #344054; background: #fff; box-shadow: 0 2px 8px rgba(16, 24, 40, 0.12); font-size: 0.82rem; white-space: nowrap; pointer-events: auto; }
+.player-stats-context-menu { position: absolute; z-index: 5; top: 0; left: calc(100% + 8px); width: 124px; transform: none; display: flex; flex-direction: column; gap: 0.45rem; pointer-events: none; }
+.player-stats-context-menu::before { display: none; }
+.player-stats-context-menu button { position: static; z-index: 1; width: 124px; height: 34px; border: 1px solid #d0d5dd; border-radius: 999px; padding: 0.25rem 0.35rem; color: #344054; background: #fff; box-shadow: 0 2px 8px rgba(16, 24, 40, 0.12); font-size: 0.82rem; white-space: nowrap; pointer-events: auto; }
 .player-stats-context-menu button:hover { background: #f2f4f7; transform: scale(1.05); }
-.player-stats-context-menu button:nth-child(1) { top: 0; left: 31px; }
-.player-stats-context-menu button:nth-child(2) { top: 49px; right: -4px; }
-.player-stats-context-menu button:nth-child(3) { bottom: 0; left: 31px; }
+.player-stats-context-menu .context-menu-quick { width: 124px; }
 .player-stats-context-menu .context-menu-attack:hover { color: #176b87; }
 .player-stats-context-menu .context-menu-defense:hover { color: #28745a; }
 .player-stats-context-menu .context-menu-sanctions:hover { color: #9a5b24; }
@@ -82,32 +82,35 @@ button { padding: 8px 12px; cursor: pointer }
 .court-surface {
 	position: relative;
 	overflow: visible;
-	background-color: #eef5ee;
-	background-image: linear-gradient(90deg, transparent 49.7%, rgba(36, 105, 67, 0.16) 49.7%, rgba(36, 105, 67, 0.16) 50.3%, transparent 50.3%), linear-gradient(rgba(255, 255, 255, 0.18) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.18) 1px, transparent 1px);
-	background-size: auto, 28px 28px, 28px 28px;
+	background-color: #c98a4b;
+	background-image: linear-gradient(90deg, rgba(111, 62, 25, 0.2) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 224, 167, 0.12), rgba(137, 77, 28, 0.08) 45%, rgba(255, 224, 167, 0.1));
+	background-size: 72px 100%, 144px 100%;
 }
 .court-surface::before {
 	content: "";
 	position: absolute;
 	inset: 18px;
-	border: 2px solid rgba(36, 105, 67, 0.2);
+	border: 2px solid rgba(255, 248, 225, 0.72);
 	border-radius: 10px;
 	pointer-events: none;
 }
 .court-surface::after {
 	content: "";
 	position: absolute;
-	left: 13%;
-	right: 13%;
-	top: 50%;
-	height: 22%;
-	transform: translateY(-50%);
-	border: 2px solid rgba(36, 105, 67, 0.14);
-	border-radius: 50%;
+	left: 25%;
+	right: 25%;
+	bottom: 18px;
+	height: 38%;
+	border: 2px solid rgba(255, 248, 225, 0.72);
+	border-bottom: 0;
+	border-radius: 50% 50% 0 0;
 	pointer-events: none;
 }
 .court-surface > * { position: relative; z-index: 1; }
-.court-surface .player-circle-list { min-height: 196px; align-content: center; }
+.court-surface .player-circle-list,
+.bench-surface .player-circle-list { height: 360px; min-height: 360px; overflow-y: auto; }
+.court-surface .player-circle-list { align-content: center; }
+.empty-court-notice { align-self: flex-start; }
 .bench-surface { background: linear-gradient(180deg, #fbfaf7 0%, #f1eee8 100%); }
 .bench-surface .player-circle-list { gap: 1.1rem 1rem; }
 .bench-chair {
@@ -135,6 +138,7 @@ button { padding: 8px 12px; cursor: pointer }
 @media (max-width: 576px) {
 	/* slightly larger top padding on small screens to account for taller navbar */
 	.with-navbar { padding-top: 88px; }
-	.court-surface .player-circle-list { min-height: 240px; }
+	.court-surface .player-circle-list,
+	.bench-surface .player-circle-list { height: 360px; min-height: 360px; }
 	.stats-control-grid { grid-template-columns: 1fr; }
 }

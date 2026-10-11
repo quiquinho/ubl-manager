@@ -461,6 +461,42 @@ app.get('/api/matches/:matchId/statistics', async (req, res) => {
 	}
 })
 
+app.get('/api/teams/:teamId/statistics', async (req, res) => {
+	const teamId = Number(req.params.teamId)
+	const from = String(req.query.from || '').trim()
+	const to = String(req.query.to || '').trim()
+	const statistic = String(req.query.statistic || '').trim()
+	const statisticFields = new Set(['goals', 'shots', 'turnovers', 'steals', 'saves', 'goals_conceded', 'blocks', 'exclusions_2min', 'fouls', 'seven_meters_for', 'seven_meters_against', 'goal_ratio', 'goal_effectiveness', 'goalkeeper_ratio', 'goalkeeper_effectiveness'])
+	const statisticConditions = {
+		seven_meters_for: 'COALESCE(SUM(s.seven_meters_scored), 0) > 0', seven_meters_against: 'COALESCE(SUM(s.seven_meters_saved), 0) > 0',
+		goal_ratio: 'COALESCE(SUM(s.shots), 0) > 0', goal_effectiveness: 'COALESCE(SUM(s.shots), 0) > 0',
+		goalkeeper_ratio: 'COALESCE(SUM(s.saves), 0) + COALESCE(SUM(s.goals_conceded), 0) > 0', goalkeeper_effectiveness: 'COALESCE(SUM(s.saves), 0) + COALESCE(SUM(s.goals_conceded), 0) > 0'
+	}
+	if (!teamId || !Number.isInteger(teamId)) return res.status(400).json({ error: 'Equipo no válido' })
+	if ((from && !/^\d{4}-\d{2}-\d{2}$/.test(from)) || (to && !/^\d{4}-\d{2}-\d{2}$/.test(to))) return res.status(400).json({ error: 'Rango de fechas no válido' })
+	if (statistic && !statisticFields.has(statistic)) return res.status(400).json({ error: 'Estadística no válida' })
+	try {
+		const [teams] = await pool.query('SELECT id, name, category, gender FROM teams WHERE id = ?', [teamId])
+		if (!teams.length) return res.status(404).json({ error: 'El equipo no existe' })
+		const conditions = ['m.home_team_id = ?']
+		const parameters = [teamId]
+		if (from) { conditions.push('m.scheduled_at >= ?'); parameters.push(`${from} 00:00:00`) }
+		if (to) { conditions.push('m.scheduled_at < DATE_ADD(?, INTERVAL 1 DAY)'); parameters.push(`${to} 00:00:00`) }
+		const dataFields = ['goals', 'shots', 'turnovers', 'steals', 'saves', 'goals_conceded', 'blocks', 'exclusions_2min', 'fouls', 'seven_meters_scored', 'seven_meters_attempted', 'seven_meters_received', 'seven_meters_saved']
+		const statSelect = dataFields.map(field => `COALESCE(SUM(s.${field}), 0) AS ${field}`).join(', ')
+		const statisticCondition = statisticConditions[statistic] || (statistic ? `COALESCE(SUM(s.${statistic}), 0) > 0` : '')
+		const [rows] = await pool.query(`SELECT p.id, p.nombre, p.apellidos, p.numero, p.posicion, COUNT(DISTINCT m.id) AS matches, COALESCE(SUM(s.time_on_court_seconds), 0) AS time_on_court_seconds, ${statSelect}
+			FROM matches m JOIN match_players mp ON mp.match_id = m.id JOIN players p ON p.id = mp.player_id LEFT JOIN match_player_stats s ON s.match_id = mp.match_id AND s.player_id = mp.player_id
+			WHERE ${conditions.join(' AND ')} GROUP BY p.id, p.nombre, p.apellidos, p.numero, p.posicion
+			${statisticCondition ? `HAVING ${statisticCondition}` : ''} ORDER BY p.numero IS NULL, p.numero, p.apellidos, p.nombre`, parameters)
+		const [[summary]] = await pool.query(`SELECT COUNT(DISTINCT m.id) AS matches FROM matches m WHERE ${conditions.join(' AND ')}`, parameters)
+		res.json({ team: teams[0], players: rows, summary, filters: { teamId, from, to, statistic } })
+	} catch (err) {
+		console.error(err)
+		res.status(500).json({ error: 'No se pudieron cargar las estadísticas del equipo' })
+	}
+})
+
 app.get('/api/players/:playerId/statistics', async (req, res) => {
 	const playerId = Number(req.params.playerId)
 	const teamId = Number(req.query.teamId || 0)
@@ -621,7 +657,7 @@ app.post('/api/matches/:matchId/follow-up/players/:playerId/shots', async (req, 
 	const eventType = String(req.body?.event_type || '')
 	const zone = String(req.body?.zone || '')
 	const validZones = ['outside', 'top-left', 'top-center', 'top-right', 'middle-left', 'middle-center', 'middle-right', 'bottom-left', 'bottom-center', 'bottom-right']
-	if (!matchId || !playerId || !['goal', 'save', 'conceded'].includes(eventType) || !validZones.includes(zone)) return res.status(400).json({ error: 'Lanzamiento no válido' })
+	if (!matchId || !playerId || !['goal', 'save', 'conceded', 'outside'].includes(eventType) || !validZones.includes(zone)) return res.status(400).json({ error: 'Lanzamiento no válido' })
 	try {
 		const [calledUp] = await pool.query('SELECT 1 FROM match_players WHERE match_id = ? AND player_id = ?', [matchId, playerId])
 		if (!calledUp.length) return res.status(404).json({ error: 'El jugador no pertenece a la convocatoria' })
@@ -634,6 +670,7 @@ app.post('/api/matches/:matchId/follow-up/players/:playerId/shots', async (req, 
 			await pool.query('UPDATE match_tracking SET home_score = (SELECT COALESCE(SUM(goals), 0) FROM match_player_stats WHERE match_id = ?) WHERE match_id = ?', [matchId, matchId])
 		}
 		else if (eventType === 'save') await pool.query('UPDATE match_player_stats SET saves = saves + 1 WHERE match_id = ? AND player_id = ?', [matchId, playerId])
+		else if (eventType === 'outside') await pool.query('UPDATE match_player_stats SET shots = shots + 1 WHERE match_id = ? AND player_id = ?', [matchId, playerId])
 		else {
 			await pool.query('UPDATE match_player_stats SET goals_conceded = goals_conceded + 1 WHERE match_id = ? AND player_id = ?', [matchId, playerId])
 			await pool.query('UPDATE match_tracking SET visitor_score = (SELECT COALESCE(SUM(goals_conceded), 0) FROM match_player_stats WHERE match_id = ?) WHERE match_id = ?', [matchId, matchId])
@@ -668,6 +705,61 @@ app.post('/api/matches/:matchId/follow-up/players/:playerId/seven-meters', async
 	} catch (err) {
 		console.error(err)
 		res.status(500).json({ error: 'No se pudo guardar el lanzamiento de 7 metros' })
+	}
+})
+
+app.get('/api/matches/:matchId/follow-up/history', async (req, res) => {
+	const matchId = Number(req.params.matchId)
+	if (!matchId) return res.status(400).json({ error: 'Partido no válido' })
+	try {
+		const [rows] = await pool.query(`SELECT e.id, e.player_id, CONCAT(p.nombre, ' ', COALESCE(p.apellidos, '')) AS player_name, e.stat_key AS action, e.amount, e.minute, e.period, e.zone, e.created_at,
+			(SELECT se.id FROM match_shot_events se WHERE se.match_id = e.match_id AND se.player_id = e.player_id AND se.event_type = e.stat_key AND se.zone <=> e.zone AND se.created_at <= e.created_at ORDER BY se.id DESC LIMIT 1) AS shot_event_id
+			FROM match_stat_events e JOIN players p ON p.id = e.player_id WHERE e.match_id = ? ORDER BY e.created_at DESC, e.id DESC`, [matchId])
+		res.json(rows)
+	} catch (err) {
+		console.error(err)
+		res.status(500).json({ error: 'No se pudo cargar el historial del partido' })
+	}
+})
+
+app.delete('/api/matches/:matchId/follow-up/history/:eventId', async (req, res) => {
+	const matchId = Number(req.params.matchId)
+	const eventId = Number(req.params.eventId)
+	if (!matchId || !eventId) return res.status(400).json({ error: 'Evento no válido' })
+	const connection = await pool.getConnection()
+	try {
+		await connection.beginTransaction()
+		const [events] = await connection.query('SELECT id, player_id, stat_key, amount, zone FROM match_stat_events WHERE id = ? AND match_id = ? FOR UPDATE', [eventId, matchId])
+		if (!events.length) { await connection.rollback(); return res.status(404).json({ error: 'La acción no existe' }) }
+		const event = events[0]
+		const statFields = new Set(['goals', 'shots', 'assists', 'turnovers', 'steals', 'saves', 'goals_conceded', 'blocks', 'exclusions_2min', 'yellow_cards', 'red_cards', 'blue_cards', 'seven_meters_scored', 'seven_meters_attempted', 'seven_meters_received', 'seven_meters_saved', 'fouls'])
+		const field = event.stat_key === 'seven_meter_goal' ? 'seven_meters_scored' : event.stat_key === 'seven_meter_save' || event.stat_key === 'seven_meter_outside' ? 'seven_meters_attempted' : event.stat_key
+		if (event.stat_key === 'seven_meter_goal') {
+			await connection.query('UPDATE match_player_stats SET seven_meters_scored = GREATEST(0, seven_meters_scored - 1), seven_meters_attempted = GREATEST(0, seven_meters_attempted - 1), goals = GREATEST(0, goals - 1), shots = GREATEST(0, shots - 1) WHERE match_id = ? AND player_id = ?', [matchId, event.player_id])
+		} else if (event.stat_key === 'seven_meter_save' || event.stat_key === 'seven_meter_outside') {
+			await connection.query('UPDATE match_player_stats SET seven_meters_attempted = GREATEST(0, seven_meters_attempted - 1) WHERE match_id = ? AND player_id = ?', [matchId, event.player_id])
+		} else if (event.stat_key === 'goal') {
+			await connection.query('UPDATE match_player_stats SET goals = GREATEST(0, goals - 1), shots = GREATEST(0, shots - 1) WHERE match_id = ? AND player_id = ?', [matchId, event.player_id])
+		} else if (event.stat_key === 'outside') {
+			await connection.query('UPDATE match_player_stats SET shots = GREATEST(0, shots - 1) WHERE match_id = ? AND player_id = ?', [matchId, event.player_id])
+		} else if (event.stat_key === 'save') {
+			await connection.query('UPDATE match_player_stats SET saves = GREATEST(0, saves - 1) WHERE match_id = ? AND player_id = ?', [matchId, event.player_id])
+		} else if (event.stat_key === 'conceded') {
+			await connection.query('UPDATE match_player_stats SET goals_conceded = GREATEST(0, goals_conceded - 1) WHERE match_id = ? AND player_id = ?', [matchId, event.player_id])
+		} else if (statFields.has(field)) {
+			await connection.query(`UPDATE match_player_stats SET ${field} = GREATEST(0, ${field} - ?) WHERE match_id = ? AND player_id = ?`, [event.amount, matchId, event.player_id])
+		}
+		await connection.query('DELETE FROM match_shot_events WHERE match_id = ? AND player_id = ? AND event_type = ? AND zone <=> ? ORDER BY id DESC LIMIT 1', [matchId, event.player_id, event.stat_key, event.zone])
+		await connection.query('DELETE FROM match_stat_events WHERE id = ? AND match_id = ?', [eventId, matchId])
+		await connection.query('UPDATE match_tracking SET home_score = (SELECT COALESCE(SUM(goals), 0) FROM match_player_stats WHERE match_id = ?), visitor_score = (SELECT COALESCE(SUM(goals_conceded), 0) FROM match_player_stats WHERE match_id = ?) WHERE match_id = ?', [matchId, matchId, matchId])
+		await connection.commit()
+		res.json({ deleted: eventId })
+	} catch (err) {
+		await connection.rollback()
+		console.error(err)
+		res.status(500).json({ error: 'No se pudo borrar la acción' })
+	} finally {
+		connection.release()
 	}
 })
 
@@ -764,6 +856,19 @@ app.put('/api/matches/:matchId', async (req, res) => {
 		res.status(500).json({ error: 'No se pudo actualizar la programación' });
 	}
 });
+
+app.delete('/api/matches/:matchId', async (req, res) => {
+	const matchId = Number(req.params.matchId)
+	if (!matchId) return res.status(400).json({ error: 'Partido no válido' })
+	try {
+		const [result] = await pool.query('DELETE FROM matches WHERE id = ?', [matchId])
+		if (!result.affectedRows) return res.status(404).json({ error: 'El partido no existe' })
+		res.json({ deleted: matchId })
+	} catch (err) {
+		console.error(err)
+		res.status(500).json({ error: 'No se pudo borrar el partido y sus estadísticas' })
+	}
+})
 
 // Players endpoints: list and create per team
 app.get('/api/teams/:teamId/players', async (req, res) => {
