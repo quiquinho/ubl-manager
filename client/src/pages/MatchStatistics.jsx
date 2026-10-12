@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
-import { addMissingAttackZones } from '../utils/statistics'
 
 const statColumns = [
   ['goal_ratio', 'Goles/Lanz.'], ['goal_effectiveness', '% efectividad'],
@@ -64,7 +63,7 @@ export default function MatchStatistics() {
     if (!selectedMatchId) return
     setData(null)
     axios.get(`/api/matches/${selectedMatchId}/statistics`).then(response => {
-      setData({ ...response.data, events: addMissingAttackZones(response.data.events || [], response.data.summary.shots) })
+      setData(response.data)
       setError('')
     }).catch(errorResponse => setError(errorResponse.response?.data?.error || 'No se pudieron cargar las estadísticas.'))
   }, [selectedMatchId])
@@ -92,9 +91,17 @@ export default function MatchStatistics() {
         return { zone, shots: zoneEvents.length, positive, ratio: zoneEvents.length ? positive / zoneEvents.length : 0 }
       })
     }
+    const attackEvents = filteredEvents.filter(event =>
+      (event.event_source === 'shot' && ['goal', 'outside'].includes(event.action)) ||
+      (event.event_source === 'stat' && ['seven_meter_goal', 'seven_meter_outside'].includes(event.action)),
+    )
+    const ownEvents = filteredEvents.filter(event =>
+      (event.event_source === 'shot' && ['save', 'conceded'].includes(event.action)) ||
+      (event.event_source === 'stat' && event.action === 'seven_meter_save'),
+    )
     return {
-      attack: buildStats(filteredEvents.filter(event => ['goal', 'outside', 'seven_meter_goal', 'seven_meter_outside'].includes(event.action)), ['goal', 'seven_meter_goal']),
-      own: buildStats(filteredEvents.filter(event => ['save', 'conceded', 'seven_meter_save'].includes(event.action)), ['save', 'seven_meter_save'])
+      attack: buildStats(attackEvents, ['goal', 'seven_meter_goal']),
+      own: buildStats(ownEvents, ['save', 'seven_meter_save'])
     }
   }, [filteredEvents])
 
@@ -118,7 +125,7 @@ export default function MatchStatistics() {
       {data && <>
         <div className="row g-3 mb-3"><div className="col-md-3"><div className="card h-100"><div className="card-body"><small className="text-muted">Marcador</small><div className="display-6 fw-bold">{data.summary.home_score} - {data.summary.visitor_score}</div><small>{data.match.home_team_name} · {data.match.visitor_name}</small></div></div></div><div className="col-md-3"><div className="card h-100"><div className="card-body"><small className="text-muted">Goles y lanzamientos</small><div className="display-6 fw-bold">{data.summary.goals}</div><small>{data.summary.shots} lanzamientos</small></div></div></div><div className="col-md-3"><div className="card h-100"><div className="card-body"><small className="text-muted">7 metros</small><div className="display-6 fw-bold">{data.summary.seven_meters}</div><small>lanzamientos</small></div></div></div><div className="col-md-3"><div className="card h-100"><div className="card-body"><small className="text-muted">Tiempo acumulado</small><div className="display-6 fw-bold">{formatDuration(data.summary.time_on_court_seconds)}</div><small>{data.players.length} jugadores</small></div></div></div></div>
         <div className="card mb-3"><div className="card-header d-flex justify-content-between"><strong>Rendimiento por jugador</strong><span className="text-muted small">{filteredPlayers.length} jugadores</span></div><div className="table-responsive"><table className="table table-sm table-bordered align-middle mb-0"><thead><tr><th>Jugador</th><th>Posición</th><th>Situación</th><th>Tiempo</th>{statColumns.map(([, label]) => <th key={label}>{label}</th>)}</tr></thead><tbody>{filteredPlayers.map(player => <tr key={player.id}><td className="text-nowrap">{player.numero ? `#${player.numero} ` : ''}{playerName(player)}</td><td>{player.posicion || 'Sin posición'}</td><td>{player.on_court ? 'Pista' : 'Banquillo'}</td><td>{formatDuration(player.time_on_court_seconds)}</td>{statColumns.map(([field]) => <td key={field}>{statValue(player, field)}</td>)}</tr>)}</tbody></table></div></div>
-        <div className="row g-3 mb-3"><div className="col-xl-6"><div className="card h-100"><div className="card-header d-flex justify-content-between"><strong>Portería ajena</strong><span className="text-muted small">Tiros y goles</span></div><div className="card-body"><div className="goal-frame statistics-goal-frame"><div className="goal-grid statistics-goal-grid">{zoneStats.attack.map(({ zone, shots, positive, ratio }) => <div className={`statistics-goal-zone ${shots === 0 ? 'zone-neutral' : ratio > 0 ? 'zone-positive' : 'zone-negative'}`} key={zone}><strong>{zoneLabels[zone]}</strong><span><i className="fa-solid fa-bullseye" aria-hidden="true" /> {shots} tiros</span><span><i className="fa-solid fa-check" aria-hidden="true" /> {positive} goles</span><b>{Math.round(ratio * 100)}%</b></div>)}</div></div></div></div></div><div className="col-xl-6"><div className="card h-100"><div className="card-header d-flex justify-content-between"><strong>Portería propia</strong><span className="text-muted small">Paradas y goles recibidos</span></div><div className="card-body"><div className="goal-frame statistics-goal-frame"><div className="goal-grid statistics-goal-grid">{zoneStats.own.map(({ zone, shots, positive, ratio }) => <div className={`statistics-goal-zone ${shots === 0 ? 'zone-neutral' : ratio > 0 ? 'zone-positive' : 'zone-negative'}`} key={zone}><strong>{zoneLabels[zone]}</strong><span><i className="fa-solid fa-bullseye" aria-hidden="true" /> {shots} tiros</span><span><i className="fa-solid fa-shield-halved" aria-hidden="true" /> {positive} paradas</span><b>{Math.round(ratio * 100)}%</b></div>)}</div></div></div></div></div><div className="col-12"><div className="small text-muted text-center"><i className="fa-solid fa-circle-info me-1" aria-hidden="true" />Portería ajena: verde es gol. Portería propia: verde es parada y rojo es gol recibido. Gris: sin acciones.</div></div></div>
+        <div className="row g-3 mb-3"><div className="col-xl-6"><div className="card h-100"><div className="card-header d-flex justify-content-between"><strong>Portería ajena</strong><span className="text-muted small">Tiros y goles</span></div><div className="card-body"><div className="goal-frame statistics-goal-frame"><div className="goal-grid statistics-goal-grid">{zoneStats.attack.map(({ zone, shots, positive, ratio }) => <div className={`statistics-goal-zone ${shots === 0 ? 'zone-neutral' : ratio <= 0.33 ? 'zone-negative' : ratio <= 0.66 ? 'zone-warning' : 'zone-positive'}`} key={zone}><strong>{zoneLabels[zone]}</strong><span><i className="fa-solid fa-bullseye" aria-hidden="true" /> {shots} tiros</span><span><i className="fa-solid fa-check" aria-hidden="true" /> {positive} goles</span><b>{Math.round(ratio * 100)}%</b></div>)}</div></div></div></div></div><div className="col-xl-6"><div className="card h-100"><div className="card-header d-flex justify-content-between"><strong>Portería propia</strong><span className="text-muted small">Paradas y goles recibidos</span></div><div className="card-body"><div className="goal-frame statistics-goal-frame"><div className="goal-grid statistics-goal-grid">{zoneStats.own.map(({ zone, shots, positive, ratio }) => <div className={`statistics-goal-zone ${shots === 0 ? 'zone-neutral' : ratio <= 0.33 ? 'zone-negative' : ratio <= 0.66 ? 'zone-warning' : 'zone-positive'}`} key={zone}><strong>{zoneLabels[zone]}</strong><span><i className="fa-solid fa-bullseye" aria-hidden="true" /> {shots} tiros</span><span><i className="fa-solid fa-shield-halved" aria-hidden="true" /> {positive} paradas</span><b>{Math.round(ratio * 100)}%</b></div>)}</div></div></div></div></div><div className="col-12"><div className="small text-muted text-center"><i className="fa-solid fa-circle-info me-1" aria-hidden="true" />Rojo: 0-33%. Amarillo: 34-66%. Verde: más de 66%. Gris: sin acciones.</div></div></div>
         <div className="card"><div className="card-header d-flex justify-content-between"><strong>Acciones registradas</strong><span className="text-muted small">{filteredEvents.length} resultados</span></div><div className="table-responsive"><table className="table table-sm table-hover align-middle mb-0"><thead><tr><th>Jugador</th><th>Acción</th><th>Zona</th><th>Minuto</th><th>Fecha</th></tr></thead><tbody>{filteredEvents.map(event => <tr key={`${event.action}-${event.id}`}><td>{event.player_name}</td><td>{actionLabels[event.action] || event.action}</td><td>{zoneLabels[event.zone] || event.zone || 'Sin zona'}</td><td>{event.minute || '-'}</td><td>{new Date(event.created_at).toLocaleString('es-ES')}</td></tr>)}{!filteredEvents.length && <tr><td colSpan="5" className="text-center text-muted py-3">No hay acciones para los filtros seleccionados.</td></tr>}</tbody></table></div></div>
       </>}
     </div>

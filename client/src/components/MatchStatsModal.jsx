@@ -51,7 +51,9 @@ function ZoneSummary({ events, title, positiveActions, icon }) {
               {zones.map(zone => {
                 const zoneEvents = events.filter(event => event.zone === zone)
                 const positive = zoneEvents.filter(event => positiveActions.includes(event.action)).length
-                return <div className={`statistics-goal-zone ${!zoneEvents.length ? 'zone-neutral' : positive ? 'zone-positive' : 'zone-negative'}`} key={zone}>
+                const effectiveness = zoneEvents.length ? positive / zoneEvents.length : 0
+                const zoneClass = !zoneEvents.length ? 'zone-neutral' : effectiveness <= 0.33 ? 'zone-negative' : effectiveness <= 0.66 ? 'zone-warning' : 'zone-positive'
+                return <div className={`statistics-goal-zone ${zoneClass}`} key={zone}>
                   <strong>{zoneLabels[zone]}</strong>
                   <span><i className="fa-solid fa-bullseye" aria-hidden="true" /> {zoneEvents.length} acciones</span>
                   <span><i className={`fa-solid ${icon}`} aria-hidden="true" /> {positive} positivas</span>

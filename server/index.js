@@ -21,6 +21,24 @@ if (!process.env.DB_PASS) {
 }
 
 let pool;
+const attackEventTypes = ['goal', 'outside', 'seven_meter_goal', 'seven_meter_outside'];
+const quadrantZones = ['top-left', 'top-center', 'top-right', 'middle-left', 'middle-center', 'middle-right', 'bottom-left', 'bottom-center', 'bottom-right'];
+
+function randomQuadrant() {
+	return quadrantZones[Math.floor(Math.random() * quadrantZones.length)];
+}
+
+async function persistMissingAttackZones(matchId) {
+	const [events] = await pool.query(
+		`SELECT id FROM match_stat_events
+		 WHERE match_id = ? AND stat_key IN (?) AND (zone IS NULL OR zone = '')`,
+		[matchId, attackEventTypes],
+	);
+	for (const event of events) {
+		await pool.query('UPDATE match_stat_events SET zone = ? WHERE id = ?', [randomQuadrant(), event.id]);
+	}
+}
+
 async function initDb() {
 	pool = mysql.createPool({
 		host: DB_HOST,
@@ -381,6 +399,7 @@ app.get('/api/matches/:matchId/follow-up', async (req, res) => {
 		if (!matches.length) return res.status(404).json({ error: 'El partido no existe' })
 		await pool.query('INSERT IGNORE INTO match_tracking (match_id) VALUES (?)', [matchId])
 		await pool.query('INSERT IGNORE INTO match_player_stats (match_id, player_id) SELECT match_id, player_id FROM match_players WHERE match_id = ?', [matchId])
+		await persistMissingAttackZones(matchId)
 		const [tracking] = await pool.query('SELECT home_score, visitor_score, period, match_status, elapsed_seconds, timer_started_at, notes FROM match_tracking WHERE match_id = ?', [matchId])
 		if (tracking[0]?.match_status === 'No iniciado') {
 			await pool.query('DELETE FROM match_stat_events WHERE match_id = ?', [matchId])
@@ -440,9 +459,9 @@ app.get('/api/matches/:matchId/statistics', async (req, res) => {
 			delete player.photo_blob
 			player.time_on_court_seconds = Number(player.time_on_court_seconds || 0) + (tracking.match_status === 'En juego' && player.on_court ? secondsSince(player.court_started_at) : 0)
 		})
-		const [shotEvents] = await pool.query(`SELECT e.id, e.player_id, CONCAT(p.nombre, ' ', COALESCE(p.apellidos, '')) AS player_name, e.event_type AS action, e.zone, NULL AS minute, e.created_at
+		const [shotEvents] = await pool.query(`SELECT e.id, e.player_id, CONCAT(p.nombre, ' ', COALESCE(p.apellidos, '')) AS player_name, e.event_type AS action, e.zone, NULL AS minute, e.created_at, 'shot' AS event_source
 			FROM match_shot_events e JOIN players p ON p.id = e.player_id WHERE e.match_id = ?`, [matchId])
-		const [statEvents] = await pool.query(`SELECT e.id, e.player_id, CONCAT(p.nombre, ' ', COALESCE(p.apellidos, '')) AS player_name, e.stat_key AS action, e.zone, e.minute, e.period, e.created_at
+		const [statEvents] = await pool.query(`SELECT e.id, e.player_id, CONCAT(p.nombre, ' ', COALESCE(p.apellidos, '')) AS player_name, e.stat_key AS action, e.zone, e.minute, e.period, e.created_at, 'stat' AS event_source
 			FROM match_stat_events e JOIN players p ON p.id = e.player_id WHERE e.match_id = ?`, [matchId])
 		const events = [...shotEvents, ...statEvents].sort((left, right) => new Date(right.created_at) - new Date(left.created_at))
 		const summary = {
@@ -655,9 +674,10 @@ app.post('/api/matches/:matchId/follow-up/players/:playerId/shots', async (req, 
 	const matchId = Number(req.params.matchId)
 	const playerId = Number(req.params.playerId)
 	const eventType = String(req.body?.event_type || '')
-	const zone = String(req.body?.zone || '')
+	const requestedZone = String(req.body?.zone || '')
 	const validZones = ['outside', 'top-left', 'top-center', 'top-right', 'middle-left', 'middle-center', 'middle-right', 'bottom-left', 'bottom-center', 'bottom-right']
-	if (!matchId || !playerId || !['goal', 'save', 'conceded', 'outside'].includes(eventType) || !validZones.includes(zone)) return res.status(400).json({ error: 'Lanzamiento no válido' })
+	if (!matchId || !playerId || !['goal', 'save', 'conceded', 'outside'].includes(eventType) || (requestedZone && !validZones.includes(requestedZone))) return res.status(400).json({ error: 'Lanzamiento no válido' })
+	const zone = requestedZone || randomQuadrant()
 	try {
 		const [calledUp] = await pool.query('SELECT 1 FROM match_players WHERE match_id = ? AND player_id = ?', [matchId, playerId])
 		if (!calledUp.length) return res.status(404).json({ error: 'El jugador no pertenece a la convocatoria' })
@@ -686,9 +706,10 @@ app.post('/api/matches/:matchId/follow-up/players/:playerId/seven-meters', async
 	const matchId = Number(req.params.matchId)
 	const playerId = Number(req.params.playerId)
 	const outcome = String(req.body?.outcome || '')
-	const zone = String(req.body?.zone || '')
+	const requestedZone = String(req.body?.zone || '')
 	const validZones = ['top-left', 'top-center', 'top-right', 'middle-left', 'middle-center', 'middle-right', 'bottom-left', 'bottom-center', 'bottom-right']
-	if (!matchId || !playerId || !['goal', 'save', 'outside'].includes(outcome) || !validZones.includes(zone)) return res.status(400).json({ error: 'Lanzamiento de 7 metros no válido' })
+	if (!matchId || !playerId || !['goal', 'save', 'outside'].includes(outcome) || (requestedZone && !validZones.includes(requestedZone))) return res.status(400).json({ error: 'Lanzamiento de 7 metros no válido' })
+	const zone = requestedZone || randomQuadrant()
 	try {
 		const [calledUp] = await pool.query('SELECT 1 FROM match_players WHERE match_id = ? AND player_id = ?', [matchId, playerId])
 		if (!calledUp.length) return res.status(404).json({ error: 'El jugador no pertenece a la convocatoria' })

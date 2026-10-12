@@ -119,9 +119,9 @@ export default function PlayerStatsModal({ player, teams, onClose }) {
                         const goals = zoneEvents.filter(event => (goalkeeper ? goalkeeperGoalActions : fieldGoalActions).has(event.action)).length
                         const saves = zoneEvents.filter(event => goalkeeperSaveActions.has(event.action)).length
                         const positiveActions = goalkeeper ? saves : goals
-                        const positive = zoneEvents.length > 0 && positiveActions / zoneEvents.length > 0.5
                         const effectiveness = zoneEvents.length ? Math.round((positiveActions / zoneEvents.length) * 100) : 0
-                        return <div className={`statistics-goal-zone ${zoneEvents.length ? (positive ? 'zone-positive' : 'zone-negative') : 'zone-neutral'}`} key={zone}>
+                        const zoneClass = !zoneEvents.length ? 'zone-neutral' : effectiveness <= 33 ? 'zone-negative' : effectiveness <= 66 ? 'zone-warning' : 'zone-positive'
+                        return <div className={`statistics-goal-zone ${zoneClass}`} key={zone}>
                           <strong>{label}</strong>
                           <span><i className={`fa-solid ${goalkeeper ? 'fa-shield-halved' : 'fa-futbol'}`} aria-hidden="true" /> {positiveActions}/{zoneEvents.length} · {effectiveness}%</span>
                         </div>

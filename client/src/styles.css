@@ -31,6 +31,7 @@ button { padding: 8px 12px; cursor: pointer }
 .statistics-goal-zone span { font-size: 0.7rem; }
 .statistics-goal-zone.zone-neutral { background: #e9ecef; color: #6c757d; }
 .statistics-goal-zone.zone-positive { background: #d1e7dd; color: #0f5132; border-color: #75b798; }
+.statistics-goal-zone.zone-warning { background: #fff3cd; color: #664d03; border-color: #ffda6a; }
 .statistics-goal-zone.zone-negative { background: #f8d7da; color: #842029; border-color: #ea868f; }
 .statistics-goal-zone b { font-size: 0.85rem; }
 .player-circle-list { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start; }
