@@ -151,9 +151,18 @@ function StatControl({ player, field, label, onChange, onShot, onSevenMeter }) {
     );
   }
   if (field === "shots") {
+    const goalkeeper = isGoalkeeper(player);
+    const launches = goalkeeper ? Number(player.saves || 0) + Number(player.goals_conceded || 0) : Number(player.shots || 0);
     return (
-      <button type="button" className="btn btn-sm btn-outline-primary text-nowrap" onClick={() => onShot(player, "attack")} aria-label="Registrar lanzamiento" title="Registrar lanzamiento">
-        <i className="fa-solid fa-bullseye me-1" aria-hidden="true" />{player.goals || 0}/{player.shots || 0}
+      <button type="button" className="btn btn-sm btn-outline-primary text-nowrap" onClick={() => onShot(player, goalkeeper ? "defense" : "attack")} aria-label={goalkeeper ? "Registrar lanzamiento recibido" : "Registrar lanzamiento"} title={goalkeeper ? "Registrar lanzamiento recibido" : "Registrar lanzamiento"}>
+        <i className={`fa-solid ${goalkeeper ? "fa-shield-halved" : "fa-bullseye"} me-1`} aria-hidden="true" />{goalkeeper ? `${player.saves || 0}/${launches}` : `${player.goals || 0}/${player.shots || 0}`}
+      </button>
+    );
+  }
+  if (field === "seven_meters_saved") {
+    return (
+      <button type="button" className="btn btn-sm btn-outline-primary text-nowrap" onClick={() => onSevenMeter(player)} aria-label="Registrar parada de 7 metros" title="Registrar parada de 7 metros">
+        <i className="fa-solid fa-shield-halved me-1" aria-hidden="true" />{player.seven_meters_saved || 0}/{player.seven_meters_received || 0}
       </button>
     );
   }
@@ -175,19 +184,28 @@ function StatControl({ player, field, label, onChange, onShot, onSevenMeter }) {
   );
 }
 
-function PlayerStatsContextMenu({ onSelect, onQuickAction, bench, onMoveToCourt }) {
+function PlayerStatsContextMenu({ onSelect, onQuickAction, onSevenMeter, bench, onMoveToCourt }) {
   return (
-    <div className="player-stats-context-menu" role="menu" aria-label="Grupo de estadísticas">
+    <div className={`player-stats-context-menu ${bench ? "player-stats-context-menu-bench" : ""}`} role="menu" aria-label="Grupo de estadísticas">
       {bench ? (
         <button type="button" className="context-menu-quick" onClick={onMoveToCourt} role="menuitem">A pista</button>
       ) : <>
-      <button type="button" className="context-menu-attack context-menu-quick" onClick={() => onQuickAction("shots")} role="menuitem">Lanzamientos</button>
-      <button type="button" className="context-menu-attack context-menu-quick" onClick={() => onQuickAction("assists")} role="menuitem">Asistencias</button>
-      {statisticGroups.map((item) => (
-        <button type="button" key={item.key} className={`context-menu-${item.key}`} onClick={() => onSelect(item.key)} role="menuitem">
-          {item.label}
-        </button>
-      ))}
+        <div className="player-stats-context-side player-stats-context-left">
+          {onSevenMeter ? <>
+            <button type="button" className="context-menu-defense context-menu-quick" onClick={() => onQuickAction("saves")} role="menuitem"><i className="fa-solid fa-shield-halved me-1" aria-hidden="true" />Paradas</button>
+            <button type="button" className="context-menu-defense context-menu-quick" onClick={onSevenMeter} role="menuitem"><i className="fa-solid fa-bullseye me-1" aria-hidden="true" />7m parado/total</button>
+          </> : <>
+            <button type="button" className="context-menu-attack context-menu-quick" onClick={() => onQuickAction("shots")} role="menuitem"><i className="fa-solid fa-bullseye me-1" aria-hidden="true" />Lanzamientos</button>
+            <button type="button" className="context-menu-attack context-menu-quick" onClick={() => onQuickAction("assists")} role="menuitem"><i className="fa-solid fa-handshake me-1" aria-hidden="true" />Asistencias</button>
+          </>}
+        </div>
+        <div className="player-stats-context-side player-stats-context-right">
+          {statisticGroups.map((item) => (
+            <button type="button" key={item.key} className={`context-menu-${item.key}`} onClick={() => onSelect(item.key)} role="menuitem">
+              <i className={`fa-solid ${item.key === "attack" ? "fa-rocket" : item.key === "defense" ? "fa-shield-halved" : "fa-triangle-exclamation"} me-1`} aria-hidden="true" />{item.label}
+            </button>
+          ))}
+        </div>
       </>}
     </div>
   );
@@ -564,7 +582,16 @@ export default function MatchFollowUp() {
       setShotModal({ show: true, player, eventType: isGoalkeeper(player) ? "defense" : "attack", zone: null });
       return;
     }
+    if (action === "saves") {
+      setShotModal({ show: true, player, eventType: "defense", zone: null });
+      return;
+    }
     changePlayerStat(player, action, 1);
+  }
+
+  function openGoalkeeperSevenMeter(player) {
+    setStatsContextPlayer(null);
+    setSevenMeterModal({ show: true, player, outcome: "save", zone: null });
   }
 
   async function toggleCourt(player) {
@@ -871,7 +898,7 @@ export default function MatchFollowUp() {
                       onPhotoClick={openStatsMenu}
                     />
                     {statsContextPlayer?.id === player.id && (
-                      <PlayerStatsContextMenu onSelect={openStatsGroup} onQuickAction={openQuickAttackAction} />
+                      <PlayerStatsContextMenu onSelect={openStatsGroup} onQuickAction={openQuickAttackAction} onSevenMeter={isGoalkeeper(player) ? () => openGoalkeeperSevenMeter(player) : null} />
                     )}
                     <div className="player-circle-actions">
                       <button
@@ -956,9 +983,10 @@ export default function MatchFollowUp() {
                 ))}
               </tr>
               <tr>
-                {statistics.map(([, label]) => (
-                  <th key={label} title={label}>{label}</th>
-                ))}
+                {statistics.map(([field, label]) => {
+                  const displayedLabel = isGoalkeeper(selectedPlayer) && field === "shots" ? "Lanz. Rec." : label;
+                  return <th key={field} title={displayedLabel}>{displayedLabel}</th>;
+                })}
               </tr>
             </thead>
             <tbody>
@@ -1198,6 +1226,7 @@ export default function MatchFollowUp() {
                 </div>
                 <div className="modal-body text-center">
                   <p className="mb-3">{sevenMeterModal.player?.nombre} {sevenMeterModal.player?.apellidos || ""}</p>
+                  <button type="button" className="btn btn-outline-secondary mb-2" onClick={() => registerSevenMeter("outside", "outside")} aria-label="Lanzamiento de 7 metros fuera de portería" title="Lanzamiento de 7 metros fuera de portería"><i className="fa-solid fa-arrow-up-right-from-square me-1" aria-hidden="true" />Fuera de portería</button>
                   <div className="goal-frame">
                     <div className="goal-grid">
                       {shotZones.map(([zone, label]) => (

@@ -707,16 +707,24 @@ app.post('/api/matches/:matchId/follow-up/players/:playerId/seven-meters', async
 	const playerId = Number(req.params.playerId)
 	const outcome = String(req.body?.outcome || '')
 	const requestedZone = String(req.body?.zone || '')
-	const validZones = ['top-left', 'top-center', 'top-right', 'middle-left', 'middle-center', 'middle-right', 'bottom-left', 'bottom-center', 'bottom-right']
+	const validZones = ['outside', 'top-left', 'top-center', 'top-right', 'middle-left', 'middle-center', 'middle-right', 'bottom-left', 'bottom-center', 'bottom-right']
 	if (!matchId || !playerId || !['goal', 'save', 'outside'].includes(outcome) || (requestedZone && !validZones.includes(requestedZone))) return res.status(400).json({ error: 'Lanzamiento de 7 metros no válido' })
 	const zone = requestedZone || randomQuadrant()
 	try {
 		const [calledUp] = await pool.query('SELECT 1 FROM match_players WHERE match_id = ? AND player_id = ?', [matchId, playerId])
 		if (!calledUp.length) return res.status(404).json({ error: 'El jugador no pertenece a la convocatoria' })
+		const [playerRows] = await pool.query('SELECT posicion FROM players WHERE id = ?', [playerId])
+		const goalkeeper = String(playerRows[0]?.posicion || '').toLocaleLowerCase('es').includes('portero')
 		const [trackingRows] = await pool.query('SELECT elapsed_seconds, timer_started_at, match_status, period FROM match_tracking WHERE match_id = ?', [matchId])
 		const minute = Math.floor(liveElapsedSeconds(trackingRows[0] || {}) / 60) + 1
 		await pool.query('INSERT INTO match_stat_events (match_id, player_id, stat_key, amount, `minute`, period, `zone`) VALUES (?, ?, ?, 1, ?, ?, ?)', [matchId, playerId, `seven_meter_${outcome}`, minute, trackingRows[0]?.period || '1/2', zone])
-		if (outcome === 'goal') {
+		if (goalkeeper && outcome !== 'outside') {
+			if (outcome === 'save') {
+				await pool.query('UPDATE match_player_stats SET seven_meters_received = seven_meters_received + 1, seven_meters_saved = seven_meters_saved + 1 WHERE match_id = ? AND player_id = ?', [matchId, playerId])
+			} else {
+				await pool.query('UPDATE match_player_stats SET seven_meters_received = seven_meters_received + 1 WHERE match_id = ? AND player_id = ?', [matchId, playerId])
+			}
+		} else if (outcome === 'goal') {
 			await pool.query('UPDATE match_player_stats SET seven_meters_attempted = seven_meters_attempted + 1, seven_meters_scored = seven_meters_scored + 1, goals = goals + 1, shots = shots + 1 WHERE match_id = ? AND player_id = ?', [matchId, playerId])
 			await pool.query('UPDATE match_tracking SET home_score = (SELECT COALESCE(SUM(goals), 0) FROM match_player_stats WHERE match_id = ?) WHERE match_id = ?', [matchId, matchId])
 		} else {
@@ -753,9 +761,15 @@ app.delete('/api/matches/:matchId/follow-up/history/:eventId', async (req, res) 
 		const [events] = await connection.query('SELECT id, player_id, stat_key, amount, zone FROM match_stat_events WHERE id = ? AND match_id = ? FOR UPDATE', [eventId, matchId])
 		if (!events.length) { await connection.rollback(); return res.status(404).json({ error: 'La acción no existe' }) }
 		const event = events[0]
+		const [playerRows] = await connection.query('SELECT posicion FROM players WHERE id = ?', [event.player_id])
+		const goalkeeper = String(playerRows[0]?.posicion || '').toLocaleLowerCase('es').includes('portero')
 		const statFields = new Set(['goals', 'shots', 'assists', 'turnovers', 'steals', 'saves', 'goals_conceded', 'blocks', 'exclusions_2min', 'yellow_cards', 'red_cards', 'blue_cards', 'seven_meters_scored', 'seven_meters_attempted', 'seven_meters_received', 'seven_meters_saved', 'fouls'])
 		const field = event.stat_key === 'seven_meter_goal' ? 'seven_meters_scored' : event.stat_key === 'seven_meter_save' || event.stat_key === 'seven_meter_outside' ? 'seven_meters_attempted' : event.stat_key
-		if (event.stat_key === 'seven_meter_goal') {
+		if (goalkeeper && event.stat_key === 'seven_meter_save') {
+			await connection.query('UPDATE match_player_stats SET seven_meters_received = GREATEST(0, seven_meters_received - 1), seven_meters_saved = GREATEST(0, seven_meters_saved - 1) WHERE match_id = ? AND player_id = ?', [matchId, event.player_id])
+		} else if (goalkeeper && event.stat_key === 'seven_meter_goal') {
+			await connection.query('UPDATE match_player_stats SET seven_meters_received = GREATEST(0, seven_meters_received - 1) WHERE match_id = ? AND player_id = ?', [matchId, event.player_id])
+		} else if (event.stat_key === 'seven_meter_goal') {
 			await connection.query('UPDATE match_player_stats SET seven_meters_scored = GREATEST(0, seven_meters_scored - 1), seven_meters_attempted = GREATEST(0, seven_meters_attempted - 1), goals = GREATEST(0, goals - 1), shots = GREATEST(0, shots - 1) WHERE match_id = ? AND player_id = ?', [matchId, event.player_id])
 		} else if (event.stat_key === 'seven_meter_save' || event.stat_key === 'seven_meter_outside') {
 			await connection.query('UPDATE match_player_stats SET seven_meters_attempted = GREATEST(0, seven_meters_attempted - 1) WHERE match_id = ? AND player_id = ?', [matchId, event.player_id])

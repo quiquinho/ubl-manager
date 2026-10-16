@@ -34,8 +34,8 @@ button { padding: 8px 12px; cursor: pointer }
 .statistics-goal-zone.zone-warning { background: #fff3cd; color: #664d03; border-color: #ffda6a; }
 .statistics-goal-zone.zone-negative { background: #f8d7da; color: #842029; border-color: #ea868f; }
 .statistics-goal-zone b { font-size: 0.85rem; }
-.player-circle-list { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-start; }
-.player-circle-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0.35rem; min-width: 88px; }
+.player-circle-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); gap: 1rem; align-items: start; justify-items: center; }
+.player-circle-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0.35rem; width: 100%; min-width: 0; }
 .player-circle { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0.15rem; border: 0; background: transparent; padding: 0; color: inherit; }
 .player-circle-photo { position: relative; width: 72px; height: 72px; border: 3px solid #adb5bd; border-radius: 50%; background: #f1f3f5; display: inline-flex; align-items: center; justify-content: center; overflow: visible; color: #6c757d; font-size: 1.5rem; }
 .player-circle-photo img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
@@ -46,8 +46,13 @@ button { padding: 8px 12px; cursor: pointer }
 .player-circle-number { position: absolute; right: -5px; bottom: -4px; min-width: 24px; height: 24px; padding: 2px 5px; border-radius: 50%; background: #212529; color: #fff; font-size: 0.75rem; line-height: 20px; font-weight: 700; }
 .player-circle-label { width: 84px; min-height: 1.8em; font-size: 0.78rem; line-height: 1.1; text-align: center; overflow-wrap: anywhere; }
 .player-circle-actions .btn { font-size: 0.75rem; }
-.player-stats-context-menu { position: absolute; z-index: 5; top: 0; left: calc(100% + 8px); width: 124px; transform: none; display: flex; flex-direction: column; gap: 0.45rem; pointer-events: none; }
+.player-stats-context-menu { position: absolute; z-index: 5; top: 0; left: 50%; width: 140px; height: 200px; transform: translateX(-50%); pointer-events: none; }
 .player-stats-context-menu::before { display: none; }
+.player-stats-context-side { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: 0.45rem; }
+.player-stats-context-left { top: -78px; }
+.player-stats-context-right { top: 78px; }
+.player-stats-context-menu-bench { left: calc(100% + 8px); width: 124px; height: 34px; transform: none; }
+.player-stats-context-menu-bench .context-menu-quick { position: static; }
 .player-stats-context-menu button { position: static; z-index: 1; width: 124px; height: 34px; border: 1px solid #d0d5dd; border-radius: 999px; padding: 0.25rem 0.35rem; color: #344054; background: #fff; box-shadow: 0 2px 8px rgba(16, 24, 40, 0.12); font-size: 0.82rem; white-space: nowrap; pointer-events: auto; }
 .player-stats-context-menu button:hover { background: #f2f4f7; transform: scale(1.05); }
 .player-stats-context-menu .context-menu-quick { width: 124px; }
@@ -110,10 +115,10 @@ button { padding: 8px 12px; cursor: pointer }
 .court-surface > * { position: relative; z-index: 1; }
 .court-surface .player-circle-list,
 .bench-surface .player-circle-list { height: 360px; min-height: 360px; overflow-y: auto; }
-.court-surface .player-circle-list { align-content: center; }
-.empty-court-notice { align-self: flex-start; }
+.court-surface .player-circle-list { align-content: center; justify-content: center; gap: 1.35rem; padding: 0.75rem; }
+.empty-court-notice { grid-column: 1 / -1; justify-self: center; }
 .bench-surface { background: linear-gradient(180deg, #fbfaf7 0%, #f1eee8 100%); }
-.bench-surface .player-circle-list { gap: 1.1rem 1rem; }
+.bench-surface .player-circle-list { align-content: center; justify-content: center; gap: 1rem; }
 .bench-chair {
 	position: relative;
 	display: block;
@@ -141,5 +146,7 @@ button { padding: 8px 12px; cursor: pointer }
 	.with-navbar { padding-top: 88px; }
 	.court-surface .player-circle-list,
 	.bench-surface .player-circle-list { height: 360px; min-height: 360px; }
+	.player-circle-list { grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); gap: 0.75rem; }
+	.court-surface .player-circle-list { gap: 0.85rem; padding: 0.5rem; }
 	.stats-control-grid { grid-template-columns: 1fr; }
 }
