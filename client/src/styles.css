@@ -37,10 +37,10 @@ button { padding: 8px 12px; cursor: pointer }
 .player-circle-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); gap: 1rem; align-items: start; justify-items: center; }
 .player-circle-item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0.35rem; width: 100%; min-width: 0; }
 .player-circle { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0.15rem; border: 0; background: transparent; padding: 0; color: inherit; }
-.player-circle-photo { position: relative; width: 72px; height: 72px; border: 3px solid #adb5bd; border-radius: 50%; background: #f1f3f5; display: inline-flex; align-items: center; justify-content: center; overflow: visible; color: #6c757d; font-size: 1.5rem; }
+.player-circle-photo { position: relative; width: 65px; height: 65px; border: 3px solid #adb5bd; border-radius: 50%; background: #f1f3f5; display: inline-flex; align-items: center; justify-content: center; overflow: visible; color: #6c757d; font-size: 1.5rem; }
 .player-circle-photo img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
 .player-circle-fallback-number { font-size: 1.5rem; font-weight: 700; color: #212529; }
-.player-circle-compact .player-circle-photo { width: 84px; height: 84px; }
+.player-circle-compact .player-circle-photo { width: 76px; height: 76px; }
 .player-circle-compact .player-circle-fallback-number { font-size: 2rem; }
 .player-circle.is-selected .player-circle-photo { border-color: #0d6efd; box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.2); }
 .player-circle-number { position: absolute; right: -5px; bottom: -4px; min-width: 24px; height: 24px; padding: 2px 5px; border-radius: 50%; background: #212529; color: #fff; font-size: 0.75rem; line-height: 20px; font-weight: 700; }
@@ -116,6 +116,7 @@ button { padding: 8px 12px; cursor: pointer }
 .court-surface .player-circle-list,
 .bench-surface .player-circle-list { height: 360px; min-height: 360px; overflow: visible; }
 .court-surface .player-circle-list { align-content: center; justify-content: center; gap: 1.35rem; padding: 5.5rem 0.75rem; }
+.court-surface .player-circle-list { grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .empty-court-notice { grid-column: 1 / -1; justify-self: center; }
 .bench-surface { background: linear-gradient(180deg, #fbfaf7 0%, #f1eee8 100%); }
 .bench-surface .player-circle-list { align-content: center; justify-content: center; gap: 1rem; }
