@@ -881,7 +881,7 @@ export default function MatchFollowUp() {
         </div>
       </div>
       <div className="row g-3 mb-3">
-        <div className="col-xl-6">
+        <div className="col-lg-6">
           <div className="card h-100">
             <div className="card-header">
               <strong>En pista</strong>
@@ -926,7 +926,7 @@ export default function MatchFollowUp() {
             </div>
           </div>
         </div>
-        <div className="col-xl-6">
+        <div className="col-lg-6">
           <div className="card h-100">
             <div className="card-header">
               <strong>Banquillo</strong>

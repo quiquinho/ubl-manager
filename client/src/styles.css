@@ -114,8 +114,8 @@ button { padding: 8px 12px; cursor: pointer }
 }
 .court-surface > * { position: relative; z-index: 1; }
 .court-surface .player-circle-list,
-.bench-surface .player-circle-list { height: 360px; min-height: 360px; overflow-y: auto; }
-.court-surface .player-circle-list { align-content: center; justify-content: center; gap: 1.35rem; padding: 0.75rem; }
+.bench-surface .player-circle-list { height: 360px; min-height: 360px; overflow: visible; }
+.court-surface .player-circle-list { align-content: center; justify-content: center; gap: 1.35rem; padding: 5.5rem 0.75rem; }
 .empty-court-notice { grid-column: 1 / -1; justify-self: center; }
 .bench-surface { background: linear-gradient(180deg, #fbfaf7 0%, #f1eee8 100%); }
 .bench-surface .player-circle-list { align-content: center; justify-content: center; gap: 1rem; }
