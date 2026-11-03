@@ -3,6 +3,7 @@
   "appName": "UBL Manager",
   "webDir": "dist",
   "server": {
-    "cleartext": true
+    "cleartext": true,
+    "androidScheme": "http"
   }
 }
