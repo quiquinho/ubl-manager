@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">UBL Manager</string>
+    <string name="title_activity_main">UBL Manager</string>
+    <string name="package_name">com.ublmanager.app</string>
+    <string name="custom_url_scheme">com.ublmanager.app</string>
+</resources>

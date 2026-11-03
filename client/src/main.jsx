@@ -6,6 +6,8 @@ import '@fortawesome/fontawesome-free/css/all.min.css'
 import './styles.css'
 import 'bootstrap/dist/js/bootstrap.bundle.min.js'
 
+axios.defaults.baseURL = import.meta.env.VITE_API_URL || ''
+
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}))
 }
