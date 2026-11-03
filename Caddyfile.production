@@ -1,4 +1,4 @@
-ublmanager.duckdns.org {
+:80 {
     handle /api/* {
         reverse_proxy ublmanager-api:4000
     }
@@ -9,8 +9,4 @@ ublmanager.duckdns.org {
         file_server
         encode gzip
     }
-}
-
-:80 {
-	redir https://ublmanager.duckdns.org{uri} permanent
 }
