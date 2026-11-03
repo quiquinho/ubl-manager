@@ -3,6 +3,6 @@
   "appName": "UBL Manager",
   "webDir": "dist",
   "server": {
-    "cleartext": false
+    "cleartext": true
   }
 }
