@@ -245,6 +245,13 @@ CREATE TABLE IF NOT EXISTS match_stat_events (
   FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS sync_operations (
+  operation_id VARCHAR(100) PRIMARY KEY,
+  status_code SMALLINT NOT NULL,
+  response_body JSON NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Example user (password 'secret' base64 -> c2VjcmV0)
 INSERT IGNORE INTO users (login, nombre, apellidos, role_id, password_base64) VALUES
 ('admin','Admin','User',100, TO_BASE64('secret'));

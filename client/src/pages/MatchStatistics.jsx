@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
+import { getOfflineMatchStatistics, getOfflineRecord, isLocalMatchId, saveOfflineRecord } from '../utils/offlineStore'
 
 const statColumns = [
   ['goal_ratio', 'Goles/Lanz.'], ['goal_effectiveness', '% efectividad'],
@@ -55,17 +56,36 @@ export default function MatchStatistics() {
   useEffect(() => {
     axios.get('/api/matches').then(response => {
       setMatches(response.data)
+      saveOfflineRecord('matches', response.data)
       if (response.data[0]) setSelectedMatchId(String(response.data[0].id))
-    }).catch(() => setError('No se pudieron cargar los partidos.'))
+    }).catch(async () => {
+      const cachedMatches = await getOfflineRecord('matches')
+      if (cachedMatches) {
+        setMatches(cachedMatches)
+        if (cachedMatches[0]) setSelectedMatchId(String(cachedMatches[0].id))
+      } else setError('No se pudieron cargar los partidos.')
+    })
   }, [])
 
   useEffect(() => {
     if (!selectedMatchId) return
     setData(null)
+    if (isLocalMatchId(selectedMatchId)) {
+      getOfflineMatchStatistics(selectedMatchId).then(cachedData => {
+        if (cachedData) setData(cachedData)
+        else setError('No hay estadísticas locales para este partido.')
+      })
+      return
+    }
     axios.get(`/api/matches/${selectedMatchId}/statistics`).then(response => {
       setData(response.data)
+      saveOfflineRecord(`statistics:${selectedMatchId}`, response.data)
       setError('')
-    }).catch(errorResponse => setError(errorResponse.response?.data?.error || 'No se pudieron cargar las estadísticas.'))
+    }).catch(async errorResponse => {
+      const cachedData = await getOfflineRecord(`statistics:${selectedMatchId}`)
+      if (cachedData) setData(cachedData)
+      else setError(errorResponse.response?.data?.error || 'No se pudieron cargar las estadísticas.')
+    })
   }, [selectedMatchId])
 
   const filteredEvents = useMemo(() => {

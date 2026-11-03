@@ -3,6 +3,11 @@ body { font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvet
 .topmenu ul { list-style: none; margin: 0; padding: 0; display: flex; gap: 16px }
 .topmenu a { color: #fff; text-decoration: none }
 
+.offline-status { position: fixed; right: 14px; bottom: 14px; z-index: 1050; display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.45rem 0.7rem; border: 1px solid #d0d5dd; border-radius: 999px; background: #fff; box-shadow: 0 2px 8px rgba(16, 24, 40, 0.14); font-size: 0.8rem; }
+.offline-status.is-online { color: #176b87; }
+.offline-status.is-offline { color: #9a5b24; border-color: #f0c36d; background: #fff8e7; }
+.offline-status strong { font-weight: 600; }
+
 .home-landing { display: flex; flex-direction: column; align-items: center; gap: 1rem; padding: 3rem 1.25rem; text-align: center; }
 .home-landing-logo { width: min(220px, 58vw); aspect-ratio: 1; object-fit: cover; border: 4px solid rgba(255, 255, 255, 0.85); border-radius: 12px; box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25); }
 .home-landing h1 { margin: 0; }

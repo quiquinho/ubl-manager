@@ -10,6 +10,26 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
+async function idempotencyMiddleware(req, res, next) {
+	const operationId = String(req.get('X-Client-Operation-Id') || '').trim()
+	if (!operationId) return next()
+	try {
+		const [rows] = await pool.query('SELECT status_code, response_body FROM sync_operations WHERE operation_id = ?', [operationId])
+		if (rows.length) return res.status(rows[0].status_code).json(JSON.parse(rows[0].response_body))
+		const sendJson = res.json.bind(res)
+		res.json = async body => {
+			if (res.statusCode >= 200 && res.statusCode < 300) {
+				await pool.query('INSERT IGNORE INTO sync_operations (operation_id, status_code, response_body) VALUES (?, ?, ?)', [operationId, res.statusCode, JSON.stringify(body)])
+			}
+			return sendJson(body)
+		}
+		next()
+	} catch (error) {
+		console.error(error)
+		next()
+	}
+}
+
 const DB_HOST = process.env.DB_HOST || '192.168.1.61';
 const DB_USER = process.env.DB_USER || 'cynthia_user';
 const DB_PASS = process.env.DB_PASS || '';
@@ -114,6 +134,12 @@ async function initDb() {
 		FOREIGN KEY (match_id) REFERENCES matches(id) ON DELETE CASCADE,
 		FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE
 	)`);
+	await pool.query(`CREATE TABLE IF NOT EXISTS sync_operations (
+		operation_id VARCHAR(100) PRIMARY KEY,
+		status_code SMALLINT NOT NULL,
+		response_body JSON NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	)`);
 	for (const query of [
 		'ALTER TABLE match_tracking ADD COLUMN elapsed_seconds INT NOT NULL DEFAULT 0',
 		'ALTER TABLE match_tracking ADD COLUMN timer_started_at DATETIME NULL',
@@ -126,6 +152,8 @@ async function initDb() {
 		try { await pool.query(query) } catch (err) { if (err.code !== 'ER_DUP_FIELDNAME') throw err }
 	}
 }
+
+app.use('/api', idempotencyMiddleware)
 
 app.get('/api/menu', async (req, res) => {
 	const roleId = parseInt(req.query.roleId || '100', 10);

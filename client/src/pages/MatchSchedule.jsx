@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import axios from 'axios'
 import Swal from 'sweetalert2'
 import MatchStatsModal from '../components/MatchStatsModal'
+import { createLocalId, getOfflineRecord, isLocalMatchId, requestOrQueue, saveOfflineRecord } from '../utils/offlineStore'
 
 const emptyForm = { homeTeamId: '', visitorId: '', venueId: '', matchDate: '', matchTime: '', advanceMinutes: 30, playerIds: [] }
 
@@ -46,8 +47,15 @@ export default function MatchSchedule() {
       return
     }
     axios.get(`/api/teams/${form.homeTeamId}/players`)
-      .then(response => setTeamPlayers(response.data))
-      .catch(() => setError('No se pudieron cargar los jugadores del equipo.'))
+      .then(response => {
+        setTeamPlayers(response.data)
+        saveOfflineRecord(`team-players:${form.homeTeamId}`, response.data)
+      })
+      .catch(async () => {
+        const cachedPlayers = await getOfflineRecord(`team-players:${form.homeTeamId}`)
+        if (cachedPlayers) setTeamPlayers(cachedPlayers)
+        else setError('No se pudieron cargar los jugadores del equipo.')
+      })
   }, [form.homeTeamId])
 
   async function loadData() {
@@ -59,9 +67,31 @@ export default function MatchSchedule() {
       setTeams(teamsResponse.data)
       setVisitors(visitorsResponse.data)
       setVenues(venuesResponse.data)
+      await Promise.all([
+        saveOfflineRecord('matches', matchesResponse.data),
+        saveOfflineRecord('teams', teamsResponse.data),
+        saveOfflineRecord('visitors', visitorsResponse.data),
+        saveOfflineRecord('venues', venuesResponse.data),
+      ])
     } catch (err) {
-      setError(err.response?.data?.error || 'No se pudieron cargar los datos de partidos.')
+      const [cachedMatches, cachedTeams, cachedVisitors, cachedVenues] = await Promise.all([
+        getOfflineRecord('matches'), getOfflineRecord('teams'), getOfflineRecord('visitors'), getOfflineRecord('venues'),
+      ])
+      if (cachedMatches && cachedTeams && cachedVisitors && cachedVenues) {
+        setMatches(cachedMatches)
+        setTeams(cachedTeams)
+        setVisitors(cachedVisitors)
+        setVenues(cachedVenues)
+        setError('Sin conexión: mostrando los datos guardados localmente.')
+      } else setError(err.response?.data?.error || 'No se pudieron cargar los datos de partidos.')
     }
+  }
+
+  async function getMatchPlayers(matchId) {
+    if (isLocalMatchId(matchId)) return (await getOfflineRecord(`match-players:${matchId}`)) || []
+    const response = await axios.get(`/api/matches/${matchId}/players`)
+    await saveOfflineRecord(`match-players:${matchId}`, response.data)
+    return response.data
   }
 
   function openMatchModal() {
@@ -73,9 +103,9 @@ export default function MatchSchedule() {
 
   async function editMatch(match) {
     try {
-      const response = await axios.get(`/api/matches/${match.id}/players`)
+      const players = await getMatchPlayers(match.id)
       const [matchDate, matchTime] = match.scheduled_at.split('T')
-      setForm({ homeTeamId: String(match.home_team_id), visitorId: String(match.visitor_id), venueId: String(match.venue_id), matchDate, matchTime, advanceMinutes: match.advance_minutes, playerIds: response.data.map(player => player.id) })
+      setForm({ homeTeamId: String(match.home_team_id), visitorId: String(match.visitor_id), venueId: String(match.venue_id), matchDate, matchTime, advanceMinutes: match.advance_minutes, playerIds: players.map(player => player.id) })
       setTeamPlayers([])
       setEditingMatchId(match.id)
       setError('')
@@ -87,9 +117,9 @@ export default function MatchSchedule() {
 
   async function showMatchPlayers(match) {
     try {
-      const response = await axios.get(`/api/matches/${match.id}/players`)
+      const players = await getMatchPlayers(match.id)
       setSelectedMatch(match)
-      setSelectedMatchPlayers(response.data)
+      setSelectedMatchPlayers(players)
       setShowPlayersModal(true)
     } catch (err) {
       setError(err.response?.data?.error || 'No se pudo cargar la convocatoria.')
@@ -98,10 +128,10 @@ export default function MatchSchedule() {
 
   async function openWhatsAppDialog(match) {
     try {
-      const response = await axios.get(`/api/matches/${match.id}/players`)
+      const players = await getMatchPlayers(match.id)
       const matchDate = new Date(match.scheduled_at)
       const arrivalDate = new Date(matchDate.getTime() - Number(match.advance_minutes || 0) * 60000)
-      const playersText = response.data.map(player => `- ${player.nombre} ${player.apellidos || ''}${player.numero ? ` (${player.numero})` : ''}`.trim()).join('\n')
+      const playersText = players.map(player => `- ${player.nombre} ${player.apellidos || ''}${player.numero ? ` (${player.numero})` : ''}`.trim()).join('\n')
       const matchInfo = `*${match.home_team_name}* vs *${match.visitor_name}*\n*Fecha:* ${formatMatchDate(match.scheduled_at)} - *Hora:* ${formatMatchTime(match.scheduled_at)}\n*Estar a las:* ${formatMatchTime(arrivalDate)} en *Pabellón:* ${match.venue_name}\n*Ubicación:* ${match.venue_location}`
       setWhatsAppText(`${matchInfo}\n\n*Convocados:*\n${playersText}`)
       setShowWhatsAppModal(true)
@@ -199,11 +229,24 @@ export default function MatchSchedule() {
         advance_minutes: Number(form.advanceMinutes),
         player_ids: form.playerIds
       }
-      if (editingMatchId) await axios.put(`/api/matches/${editingMatchId}`, payload)
-      else await axios.post('/api/matches', payload)
-      await loadData()
+      const localId = editingMatchId || createLocalId()
+      const isEditingLocalMatch = editingMatchId && isLocalMatchId(editingMatchId)
+      const operation = editingMatchId
+        ? await requestOrQueue({ method: 'put', url: `/api/matches/${editingMatchId}`, data: payload, operationType: 'update-match', localMatchId: editingMatchId })
+        : await requestOrQueue({ method: 'post', url: '/api/matches', data: payload, operationType: 'create-match', localMatchId: localId })
+      if (operation.offline || isEditingLocalMatch) {
+        const team = teams.find(item => String(item.id) === String(payload.home_team_id))
+        const visitor = visitors.find(item => String(item.id) === String(payload.visitor_id))
+        const venue = venues.find(item => String(item.id) === String(payload.venue_id))
+        const localMatch = { id: localId, ...payload, home_team_name: team?.name || '', visitor_name: visitor?.name || '', venue_name: venue?.name || '', venue_location: venue?.location || '', player_count: payload.player_ids.length, synced: false }
+        const nextMatches = editingMatchId ? matches.map(item => item.id === localId ? localMatch : item) : [...matches, localMatch]
+        await saveOfflineRecord(`match:${localId}`, localMatch)
+        await saveOfflineRecord(`match-players:${localId}`, teamPlayers.filter(player => payload.player_ids.map(String).includes(String(player.id))))
+        await saveOfflineRecord('matches', nextMatches)
+        setMatches(nextMatches)
+      } else await loadData()
       closeMatchModal()
-      setSuccess(editingMatchId ? 'Partido actualizado correctamente.' : 'Partido programado correctamente.')
+      setSuccess(operation.offline ? 'Partido guardado localmente; se sincronizará al recuperar la conexión.' : (editingMatchId ? 'Partido actualizado correctamente.' : 'Partido programado correctamente.'))
     } catch (err) {
       setError(err.response?.data?.error || 'No se pudo guardar la programación.')
     }

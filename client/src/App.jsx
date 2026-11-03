@@ -11,9 +11,12 @@ import MatchSchedule from './pages/MatchSchedule'
 import MatchStatistics from './pages/MatchStatistics'
 import MatchFollowUp from './pages/MatchFollowUp'
 import TeamStatistics from './pages/TeamStatistics'
+import OfflineStatus from './components/OfflineStatus'
+import { startOfflineSync } from './utils/offlineStore'
 
 export default function App() {
   const [roles, setRoles] = useState([])
+    useEffect(() => startOfflineSync(), [])
     useEffect(() => {
       axios.get('/api/roles').then(r => setRoles(r.data)).catch(console.error)
     }, [])
@@ -37,6 +40,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <TopMenu roleId={user.role_id} />
+      <OfflineStatus />
       <div className="with-navbar">
         <Routes>
           <Route path="/" element={<Home user={user} onLogout={handleLogout} />} />

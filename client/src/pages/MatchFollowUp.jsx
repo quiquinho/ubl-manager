@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import axios from "axios";
 import Swal from "sweetalert2";
 import MatchStatsModal from "../components/MatchStatsModal";
+import { createClientId, getOfflineRecord, isLocalMatchId, requestOrQueue, saveOfflineRecord } from "../utils/offlineStore";
 
 const statistics = [
   ["goals", "Goles"],
@@ -108,6 +109,25 @@ function secondsSinceDate(value, now = Date.now()) {
 
 function periodEndStatus(period, periods) {
   return period === `${periods}/${periods}` ? "Finalizado" : "Descanso";
+}
+
+const offlineStatFields = [
+  "goals", "shots", "assists", "turnovers", "steals", "saves", "goals_conceded", "blocks",
+  "exclusions_2min", "yellow_cards", "red_cards", "blue_cards", "seven_meters_scored",
+  "seven_meters_attempted", "seven_meters_received", "seven_meters_saved", "fouls",
+];
+
+function createOfflineFollowUp(match, players) {
+  return {
+    match,
+    duration: { periods: 2, periodFormat: "1/2", minutes: 30, label: "2 x 30 minutos" },
+    tracking: { home_score: 0, visitor_score: 0, period: "1/2", match_status: "No iniciado", elapsed_seconds: 0, timer_started_at: null, notes: "" },
+    players: players.map(player => Object.fromEntries([
+      ["id", player.id], ["nombre", player.nombre], ["apellidos", player.apellidos], ["numero", player.numero], ["posicion", player.posicion],
+      ["on_court", 0], ["time_on_court_seconds", 0], ...offlineStatFields.map(field => [field, 0]),
+    ])),
+    events: [],
+  };
 }
 
 function PlayerCircle({ player, selected, onClick, onPhotoClick, compact = false, bench = false }) {
@@ -261,12 +281,35 @@ export default function MatchFollowUp() {
     else
       axios
         .get("/api/matches")
-        .then((response) => setMatches(response.data))
-        .catch(() => setError("No se pudieron cargar los partidos."));
+        .then(async (response) => {
+          setMatches(response.data);
+          await saveOfflineRecord("matches", response.data);
+        })
+        .catch(async () => {
+          const cachedMatches = await getOfflineRecord("matches");
+          if (cachedMatches) setMatches(cachedMatches);
+          else setError("No se pudieron cargar los partidos.");
+        });
   }, [matchId]);
 
   async function loadFollowUp() {
     try {
+      if (isLocalMatchId(matchId)) {
+        let cachedFollowUp = await getOfflineRecord(`followup:${matchId}`);
+        if (!cachedFollowUp) {
+          const [match, players] = await Promise.all([
+            getOfflineRecord(`match:${matchId}`),
+            getOfflineRecord(`match-players:${matchId}`),
+          ]);
+          if (!match || !players) throw new Error("No hay datos locales para este partido.");
+          cachedFollowUp = createOfflineFollowUp(match, players);
+          await saveOfflineRecord(`followup:${matchId}`, cachedFollowUp);
+        }
+        setFollowUp(cachedFollowUp);
+        setClockSeconds(cachedFollowUp.tracking.match_status === "En juego" ? secondsSinceDate(cachedFollowUp.tracking.timer_started_at) : 0);
+        setError("");
+        return;
+      }
       const response = await axios.get(`/api/matches/${matchId}/follow-up?_=${Date.now()}`, {
         headers: {
           "Cache-Control": "no-cache, no-store, max-age=0",
@@ -303,6 +346,7 @@ export default function MatchFollowUp() {
           }
         : response.data;
       setFollowUp(freshFollowUp);
+      await saveOfflineRecord(`followup:${matchId}`, freshFollowUp);
       setStatsModal((current) => {
         if (!current.player) return current;
         const refreshedPlayer = freshFollowUp.players.find((player) => player.id === current.player.id);
@@ -311,10 +355,20 @@ export default function MatchFollowUp() {
       setClockSeconds(0);
       setError("");
     } catch (err) {
+      const cachedFollowUp = await getOfflineRecord(`followup:${matchId}`);
+      if (cachedFollowUp) {
+        setFollowUp(cachedFollowUp);
+        setError("Sin conexión: trabajando con los datos guardados localmente.");
+        return;
+      }
       setError(
         err.response?.data?.error || "No se pudo cargar el seguimiento.",
       );
     }
+  }
+
+  async function persistLocalFollowUp(nextFollowUp) {
+    await saveOfflineRecord(`followup:${matchId}`, nextFollowUp);
   }
 
   useEffect(() => {
@@ -335,11 +389,15 @@ export default function MatchFollowUp() {
     if (changes.elapsed_seconds === undefined && followUp.tracking.match_status === "En juego") {
       tracking.elapsed_seconds = Number(followUp.tracking.elapsed_seconds || 0) + clockSeconds;
     }
+    if (isLocalMatchId(matchId) && tracking.match_status === "En juego" && !tracking.timer_started_at) tracking.timer_started_at = new Date().toISOString();
+    if (tracking.match_status !== "En juego") tracking.timer_started_at = null;
     setFollowUp((current) => ({ ...current, tracking }));
     setSaving(true);
     try {
-      const response = await axios.put(`/api/matches/${matchId}/follow-up`, tracking);
-      setFollowUp((current) => ({ ...current, tracking: response.data }));
+      const operation = await requestOrQueue({ method: "put", url: `/api/matches/${matchId}/follow-up`, data: tracking, operationType: "follow-up", localMatchId: matchId });
+      const nextFollowUp = { ...followUp, tracking: operation.response?.data || tracking };
+      await persistLocalFollowUp(nextFollowUp);
+      setFollowUp(nextFollowUp);
       setClockSeconds(0);
       setCourtClock(Date.now());
       if (changes.match_status === "No iniciado") {
@@ -427,11 +485,11 @@ export default function MatchFollowUp() {
 
   async function savePlayer(player) {
     try {
-      const response = await axios.put(
-        `/api/matches/${matchId}/follow-up/players/${player.id}`,
-        player,
-      );
-      return response.data;
+      const operation = await requestOrQueue({ method: "put", url: `/api/matches/${matchId}/follow-up/players/${player.id}`, data: player, operationType: "player-stats", localMatchId: matchId });
+      const savedPlayer = operation.response?.data || player;
+      const nextFollowUp = { ...followUp, players: followUp.players.map(item => item.id === player.id ? { ...item, ...savedPlayer } : item) };
+      await persistLocalFollowUp(nextFollowUp);
+      return savedPlayer;
     } catch (err) {
       setError(
         err.response?.data?.error || "No se pudo guardar la estadística.",
@@ -537,10 +595,17 @@ export default function MatchFollowUp() {
   async function openHistory() {
     setHistoryModal({ show: true, events: [], loading: true });
     try {
+      const cachedHistory = await getOfflineRecord(`history:${matchId}`);
+      if (isLocalMatchId(matchId) && cachedHistory) {
+        setHistoryModal({ show: true, events: cachedHistory, loading: false });
+        return;
+      }
       const response = await axios.get(`/api/matches/${matchId}/follow-up/history`);
+      await saveOfflineRecord(`history:${matchId}`, response.data);
       setHistoryModal({ show: true, events: response.data, loading: false });
     } catch (err) {
-      setHistoryModal({ show: true, events: [], loading: false });
+      const cachedHistory = await getOfflineRecord(`history:${matchId}`);
+      setHistoryModal({ show: true, events: cachedHistory || [], loading: false });
       setError(err.response?.data?.error || "No se pudo cargar el historial.");
     }
   }
@@ -622,17 +687,20 @@ export default function MatchFollowUp() {
   async function registerShot(result, selectedZone = shotModal.zone) {
     const { player, eventType } = shotModal;
     const storedEventType = eventType === "attack" || eventType === "defense" ? result : eventType;
+    const effectiveZone = selectedZone || shotZones[Math.floor(Math.random() * shotZones.length)][0];
     if (eventType === "defense" && result === "outside") {
       setShotModal({ show: false, player: null, eventType: "attack", zone: null });
       return;
     }
     try {
-      await axios.post(
-        `/api/matches/${matchId}/follow-up/players/${player.id}/shots`,
-        { event_type: storedEventType, zone: selectedZone },
-      );
+      await requestOrQueue({ method: "post", url: `/api/matches/${matchId}/follow-up/players/${player.id}/shots`, data: { event_type: storedEventType, zone: effectiveZone }, operationType: "shot-event", localMatchId: matchId });
       const shotField = storedEventType === "goal" ? "goals" : storedEventType === "conceded" ? "goals_conceded" : storedEventType === "save" ? "saves" : "shots";
       const updatedPlayer = { ...player, [shotField]: Number(player[shotField] || 0) + 1 };
+      const event = { id: `local-event-${createClientId()}`, player_id: player.id, player_name: `${player.nombre} ${player.apellidos || ""}`.trim(), action: storedEventType, zone: effectiveZone, amount: 1, created_at: new Date().toISOString() };
+      const nextFollowUp = { ...followUp, players: followUp.players.map((item) => item.id === player.id ? { ...item, ...updatedPlayer } : item), events: [...(followUp.events || []), event] };
+      setFollowUp(nextFollowUp);
+      await persistLocalFollowUp(nextFollowUp);
+      await saveOfflineRecord(`history:${matchId}`, nextFollowUp.events);
       setFollowUp((current) => ({
         ...current,
         players: current.players.map((item) => item.id === player.id ? { ...item, ...updatedPlayer } : item),
@@ -641,7 +709,7 @@ export default function MatchFollowUp() {
       const statistic = storedEventType === "goal" ? "Gol" : storedEventType === "save" || storedEventType === "outside" ? "Parada" : "Gol recibido";
       showStatNotice(player, statistic, storedEventType === "goal" || storedEventType === "save");
       setShotModal({ show: false, player: null, eventType: "attack", zone: null });
-      await loadFollowUp();
+      if (!isLocalMatchId(matchId)) await loadFollowUp();
     } catch (err) {
       setError(
         err.response?.data?.error ||
@@ -652,14 +720,22 @@ export default function MatchFollowUp() {
 
   async function registerSevenMeter(result = sevenMeterModal.outcome, selectedZone = sevenMeterModal.zone) {
     const { player } = sevenMeterModal;
+    const effectiveZone = selectedZone || shotZones[Math.floor(Math.random() * shotZones.length)][0];
     try {
-      await axios.post(
-        `/api/matches/${matchId}/follow-up/players/${player.id}/seven-meters`,
-        { outcome: result, zone: selectedZone },
-      );
+      await requestOrQueue({ method: "post", url: `/api/matches/${matchId}/follow-up/players/${player.id}/seven-meters`, data: { outcome: result, zone: effectiveZone }, operationType: "seven-meter-event", localMatchId: matchId });
+      const goalkeeper = isGoalkeeper(player);
+      const changes = goalkeeper
+        ? result === "save" ? { seven_meters_received: Number(player.seven_meters_received || 0) + 1, seven_meters_saved: Number(player.seven_meters_saved || 0) + 1 } : result === "goal" ? { seven_meters_received: Number(player.seven_meters_received || 0) + 1 } : {}
+        : result === "goal" ? { seven_meters_attempted: Number(player.seven_meters_attempted || 0) + 1, seven_meters_scored: Number(player.seven_meters_scored || 0) + 1, goals: Number(player.goals || 0) + 1, shots: Number(player.shots || 0) + 1 } : { seven_meters_attempted: Number(player.seven_meters_attempted || 0) + 1 };
+      const updatedPlayer = { ...player, ...changes };
+      const event = { id: `local-event-${createClientId()}`, player_id: player.id, player_name: `${player.nombre} ${player.apellidos || ""}`.trim(), action: `seven_meter_${result}`, zone: effectiveZone, amount: 1, created_at: new Date().toISOString() };
+      const nextFollowUp = { ...followUp, players: followUp.players.map(item => item.id === player.id ? { ...item, ...updatedPlayer } : item), events: [...(followUp.events || []), event] };
+      setFollowUp(nextFollowUp);
+      await persistLocalFollowUp(nextFollowUp);
+      await saveOfflineRecord(`history:${matchId}`, nextFollowUp.events);
       showStatNotice(player, `7 metros: ${result === "goal" ? "Gol" : result === "save" ? "Parada" : "Fuera"}`, result === "goal");
       setSevenMeterModal({ show: false, player: null, outcome: "goal", zone: null });
-      await loadFollowUp();
+      if (!isLocalMatchId(matchId)) await loadFollowUp();
     } catch (err) {
       setError(
         err.response?.data?.error ||
