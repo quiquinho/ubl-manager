@@ -19,3 +19,4 @@ services:
       - ublmanager-api
     ports:
       - "4173:80"
+      - "4176:80"
